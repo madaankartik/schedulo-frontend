@@ -12,9 +12,9 @@ const steps = ['School', 'Classes', 'Periods', 'Subjects', 'Teachers', 'Assignme
 const quickClasses = ['Nursery', 'LKG', 'UKG', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12'];
 const subjectColors = { English: '#e4ad36', Hindi: '#d77751', Mathematics: '#4b8fd1', Science: '#78ad63', 'Social Studies': '#be6791', Computer: '#7d70c4', Art: '#e78963' };
 
-function App() {
+export function App({ organization, session }) {
   const [step, setStep] = useState(0);
-  const [school, setSchool] = useState({ name: 'Laurels International School', year: '2026–27' });
+  const [school, setSchool] = useState({ name: organization?.name || 'Laurels International School', year: organization?.academic_year || '2026–27' });
   const [classes, setClasses] = useState(['Nursery', 'LKG', 'UKG', 'Class 1', 'Class 2', 'Class 3']);
   const [sections, setSections] = useState({ Nursery: ['A'], LKG: ['A'], UKG: ['A'], 'Class 1': ['A'], 'Class 2': ['A'], 'Class 3': ['A'] });
   const [days, setDays] = useState(5);
@@ -34,8 +34,8 @@ function App() {
   const [customClass, setCustomClass] = useState('');
   const [showAddTeacher, setShowAddTeacher] = useState(false);
   const [toast, setToast] = useState('');
-  const [schoolId, setSchoolId] = useState(null);
-  const [apiStatus, setApiStatus] = useState('connecting');
+  const [schoolId, setSchoolId] = useState(organization?.school_id || null);
+  const [apiStatus, setApiStatus] = useState('connected');
   const [generated, setGenerated] = useState(null);
 
   const totalSections = Object.values(sections).reduce((sum, list) => sum + list.length, 0);
@@ -45,22 +45,17 @@ function App() {
 
   const notify = (message) => { setToast(message); window.setTimeout(() => setToast(''), 2400); };
   const buildSetup = () => ({ days, periods, classes, sections, subjects, frequencies, teachers, assignments });
-  useEffect(() => {
-    fetch('http://localhost:8000/api/v1/schools', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: school.name, academic_year: school.year }) })
-      .then((response) => response.json())
-      .then((data) => { setSchoolId(data.id); setApiStatus('connected'); })
-      .catch(() => setApiStatus('offline'));
-  }, []);
+  const authHeaders = () => ({ 'Content-Type': 'application/json', ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}) });
   const saveSetup = async () => {
     if (!schoolId) return false;
-    const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/setup`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: school.name, academic_year: school.year, setup: buildSetup() }) });
+    const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/setup`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ name: school.name, academic_year: school.year, setup: buildSetup() }) });
     return response.ok;
   };
   const generate = async () => {
     try {
       const saved = await saveSetup();
       if (!saved) { notify('Start the backend with python run.py first'); return; }
-      const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/generate`, { method: 'POST' });
+      const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/generate`, { method: 'POST', headers: authHeaders() });
       const result = await response.json();
       setGenerated(result);
       notify(result.status === 'INFEASIBLE' ? 'Fix the setup blockers before generating' : `Generated ${result.entries.length} timetable periods`);
@@ -160,5 +155,3 @@ function SchedulePreview({ entries }) { const days = [...new Set(entries.map((en
 function AbsencePanel({ schoolId, teachers, notify }) { const [teacher, setTeacher] = useState(teachers[0]?.name || ''); const [date, setDate] = useState('2026-08-18'); const [result, setResult] = useState(null); const checkAbsence = async () => { if (!schoolId) { notify('Connect the backend before checking absences'); return; } const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/absences`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, teacher, reason: 'Planned absence' }) }); setResult(await response.json()); }; return <Card icon={Clock3} title="Daily absence coverage" description="Create a date-specific exception without changing the approved base timetable." accent="coral"><div className="absence-form"><label>Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label><label>Absent teacher<select value={teacher} onChange={(e) => setTeacher(e.target.value)}>{teachers.map((item) => <option key={item.name}>{item.name}</option>)}</select></label><button className="secondary-button" onClick={checkAbsence}><Users size={16} /> Find substitutes</button></div>{result && <div className="absence-result"><strong>{result.affected?.length || 0} affected periods</strong><span>Available substitutes: {result.candidates?.length ? result.candidates.join(', ') : 'No conflict-free candidates found'}</span></div>}</Card>; }
 
 function Metric({ label, value, icon: Icon }) { return <div className="metric"><Icon size={18} /><div><small>{label}</small><strong>{value}</strong></div></div>; }
-
-createRoot(document.getElementById('root')).render(<App />);
