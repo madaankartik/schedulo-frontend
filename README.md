@@ -8,20 +8,14 @@ cp .env.example .env
 npm run dev
 ```
 
-### Supabase configuration
+### Authentication configuration
 
-Create a Supabase project and add these values to `.env`:
+The FastAPI backend owns authentication and signs JWT access tokens. Add these values to `.env`:
 
 ```text
 VITE_API_URL=http://localhost:8000
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-In Supabase Auth settings:
-
-- enable Email provider for magic links;
-- enable Google provider for OAuth;
-- add `http://localhost:5173` to the allowed redirect URLs.
+Google OAuth is configured on the backend with `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `API_PUBLIC_URL`, and `FRONTEND_ORIGIN`.
 
 When a user authenticates, Schedulo asks them to create an organization. The organization type can be `School` or `College / institute`; the backend creates the first scheduling workspace for it.

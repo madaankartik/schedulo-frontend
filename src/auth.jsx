@@ -1,22 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, Building2, CheckCircle2, GraduationCap, KeyRound, Mail, Sparkles } from 'lucide-react';
-import { supabase, supabaseConfigured } from './lib/supabase';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_URL, authenticate, getCurrentUser, getMyOrganization, getToken, googleLoginUrl, setToken } from './lib/auth';
 
 export function AuthGate() {
   const [session, setSession] = useState(null);
   const [organization, setOrganization] = useState(null);
-  const [loading, setLoading] = useState(supabaseConfigured);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setLoading(false); });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-    return () => listener.subscription.unsubscribe();
+    const callbackToken = new URLSearchParams(window.location.search).get('token');
+    if (window.location.pathname === '/oauth/callback' && callbackToken) {
+      setToken(callbackToken);
+      window.history.replaceState({}, '', '/');
+    }
+    const token = callbackToken || getToken();
+    getCurrentUser(token).then(async (user) => {
+      if (!user) { setSession(null); setLoading(false); return; }
+      const nextSession = { access_token: token, user };
+      setSession(nextSession);
+      try { setOrganization(await getMyOrganization(token)); } catch { setOrganization(null); }
+      setLoading(false);
+    });
   }, []);
 
-  if (!supabaseConfigured) return <AuthScreen configured={false} />;
   if (loading) return <div className="auth-loading"><div className="brand-mark"><Sparkles size={22} /></div><p>Checking your Schedulo session…</p></div>;
   if (!session) return <AuthScreen configured />;
   if (!organization) return <OrganizationSetup session={session} onCreated={setOrganization} />;
@@ -31,37 +37,54 @@ function AppWithAuth({ session, organization }) {
 }
 
 export function AuthScreen({ configured }) {
+  const [mode, setMode] = useState(() => window.location.pathname === '/signup' ? 'signup' : 'signin');
   const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [sent, setSent] = useState(false);
+  const [sentMessage, setSentMessage] = useState('');
   const [error, setError] = useState('');
-  const sendMagicLink = async (event) => {
-    event.preventDefault();
-    if (!supabase) return;
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
     setError('');
-    const { error: authError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
-    if (authError) setError(authError.message); else setSent(true);
+    setSent(false);
+    window.history.pushState({}, '', nextMode === 'signup' ? '/signup' : '/login');
+  };
+  const submitPasswordAuth = async (event) => {
+    event.preventDefault();
+    setError('');
+    setSent(false);
+    if (mode === 'signup' && password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    try {
+      await authenticate(mode === 'signin' ? 'login' : 'signup', { email, password, ...(mode === 'signup' ? { full_name: fullName } : {}) });
+      window.location.reload();
+    } catch (authError) { setError(authError.message); }
   };
   const signInWithGoogle = async () => {
-    if (!supabase) return;
-    const { error: authError } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
-    if (authError) setError(authError.message);
+    window.location.href = googleLoginUrl;
   };
-  return <div className="auth-shell"><div className="auth-decoration"><div className="orb orb-one" /><div className="orb orb-two" /><div className="auth-note"><Sparkles size={16} /><span>Scheduling that feels lighter.</span></div></div><div className="auth-panel"><div className="auth-brand"><div className="brand-mark"><Sparkles size={21} /></div><div><strong>Schedulo</strong><small>SMART SCHEDULING</small></div></div><div className="auth-copy"><div className="eyebrow"><KeyRound size={14} /> WORKSPACE ACCESS</div><h1>Make room for a better week.</h1><p>Sign in to create your school or college workspace and start building schedules that stay in sync.</p></div>{!configured ? <div className="config-callout"><strong>Connect Supabase to enable login</strong><span>Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to frontend/.env, then restart the dev server.</span></div> : sent ? <div className="sent-state"><CheckCircle2 size={28} /><h2>Check your inbox</h2><p>We sent a secure sign-in link to <strong>{email}</strong>.</p><button className="link-button" onClick={() => setSent(false)}>Use another email</button></div> : <><button className="oauth-button" onClick={signInWithGoogle}><span className="google-mark">G</span> Continue with Google <ArrowRight size={16} /></button><div className="auth-divider"><span>or use a magic link</span></div><form className="auth-form" onSubmit={sendMagicLink}><label>Email address<div className="input-icon"><Mail size={17} /><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@school.edu" /></div></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button auth-submit">Send magic link <ArrowRight size={17} /></button></form><small className="auth-legal">By continuing, you agree to Schedulo’s terms and privacy policy.</small></>}</div></div>;
+  const isSignup = mode === 'signup';
+  return <div className="auth-shell"><div className="auth-decoration"><div className="orb orb-one" /><div className="orb orb-two" /><div className="auth-note"><Sparkles size={16} /><span>Scheduling that feels lighter.</span></div></div><div className="auth-panel"><div className="auth-brand"><div className="brand-mark"><Sparkles size={21} /></div><div><strong>Schedulo</strong><small>SMART SCHEDULING</small></div></div><div className="auth-copy"><div className="eyebrow"><KeyRound size={14} /> WORKSPACE ACCESS</div><h1>{isSignup ? 'Create your account.' : 'Welcome back.'}</h1><p>{isSignup ? 'Start organizing your schedule in minutes.' : 'Sign in to continue to your scheduling workspace.'}</p></div>{sent ? <div className="sent-state"><CheckCircle2 size={28} /><h2>Account created</h2><p>{sentMessage}</p><button className="link-button" onClick={() => switchMode('signin')}>Go to sign in</button></div> : <><button className="oauth-button" onClick={signInWithGoogle}><span className="google-mark">G</span> Continue with Google <ArrowRight size={16} /></button><div className="auth-divider"><span>or</span></div><form className="auth-form" onSubmit={submitPasswordAuth}>{isSignup && <label>Full name<input type="text" required value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Jane Doe" /></label>}<label>Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><label>Password<input type="password" required minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="6+ characters" /></label>{isSignup && <label>Confirm password<input type="password" required minLength={6} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Repeat password" /></label>}{error && <div className="auth-error">{error}</div>}<button className="primary-button auth-submit">{isSignup ? 'Create account' : 'Sign in'} <ArrowRight size={17} /></button></form><div className="auth-switch">{isSignup ? 'Already have an account?' : 'New to Schedulo?'} <button type="button" onClick={() => switchMode(isSignup ? 'signin' : 'signup')}>{isSignup ? 'Sign in' : 'Create an account'}</button></div><small className="auth-legal">By continuing, you agree to Schedulo’s terms and privacy policy.</small></>}</div></div>;
 }
 
 function OrganizationSetup({ session, onCreated }) {
   const [name, setName] = useState('');
   const [type, setType] = useState('school');
+  const [academicYear, setAcademicYear] = useState(() => { const year = new Date().getFullYear(); return `${year}–${String(year + 1).slice(-2)}`; });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const createOrganization = async (event) => {
     event.preventDefault(); setLoading(true); setError('');
     try {
-      const response = await fetch(`${API_URL}/api/v1/organizations`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ name, type }) });
+      const response = await fetch(`${API_URL}/api/v1/organizations`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ name, type, academic_year: academicYear }) });
       if (!response.ok) throw new Error((await response.json()).detail || 'Could not create organization');
       onCreated(await response.json());
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };
-  return <div className="org-shell"><div className="org-card"><div className="auth-brand"><div className="brand-mark"><Sparkles size={21} /></div><div><strong>Schedulo</strong><small>SMART SCHEDULING</small></div></div><div className="org-progress"><span className="done"><CheckCircle2 size={14} /></span><i /><span className="current">2</span></div><div className="auth-copy"><div className="eyebrow"><Building2 size={14} /> YOUR WORKSPACE</div><h1>Create your organization.</h1><p>This can be your school, college, institute, or any team that needs coordinated schedules.</p></div><form className="org-form" onSubmit={createOrganization}><label>Organization name<input required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Laurels International School" /></label><label>What are you scheduling?<div className="org-options"><button type="button" className={type === 'school' ? 'org-option selected' : 'org-option'} onClick={() => setType('school')}><GraduationCap size={20} /><span><strong>School</strong><small>Classes, teachers, and periods</small></span>{type === 'school' && <CheckCircle2 size={17} />}</button><button type="button" className={type === 'college' ? 'org-option selected' : 'org-option'} onClick={() => setType('college')}><Building2 size={20} /><span><strong>College / institute</strong><small>Departments, rooms, and courses</small></span>{type === 'college' && <CheckCircle2 size={17} />}</button></div></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button auth-submit" disabled={loading}>{loading ? 'Creating workspace…' : 'Create workspace'} <ArrowRight size={17} /></button></form></div></div>;
+  return <div className="org-shell"><div className="org-card"><div className="auth-brand"><div className="brand-mark"><Sparkles size={21} /></div><div><strong>Schedulo</strong><small>SMART SCHEDULING</small></div></div><div className="org-progress"><span className="done"><CheckCircle2 size={14} /></span><i /><span className="current">2</span></div><div className="auth-copy"><div className="eyebrow"><Building2 size={14} /> YOUR WORKSPACE</div><h1>Create your organization.</h1><p>This can be your school, college, institute, or any team that needs coordinated schedules.</p></div><form className="org-form" onSubmit={createOrganization}><label>Organization name<input required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Your School or College" /></label><label>Academic year<input required value={academicYear} onChange={(event) => setAcademicYear(event.target.value)} placeholder="e.g. 2026–27" /></label><label>What are you scheduling?<div className="org-options"><button type="button" className={type === 'school' ? 'org-option selected' : 'org-option'} onClick={() => setType('school')}><GraduationCap size={20} /><span><strong>School</strong><small>Classes, teachers, and periods</small></span>{type === 'school' && <CheckCircle2 size={17} />}</button><button type="button" className={type === 'college' ? 'org-option selected' : 'org-option'} onClick={() => setType('college')}><Building2 size={20} /><span><strong>College / institute</strong><small>Departments, rooms, and courses</small></span>{type === 'college' && <CheckCircle2 size={17} />}</button></div></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button auth-submit" disabled={loading}>{loading ? 'Creating workspace…' : 'Create workspace'} <ArrowRight size={17} /></button></form></div></div>;
 }

@@ -2,39 +2,34 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowLeft, ArrowRight, BookOpen, Building2, CalendarDays, Check,
-  ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, GraduationCap,
+  ChevronDown, ChevronRight, CircleHelp, Clock3, GraduationCap,
   LayoutDashboard, Menu, Plus, Settings2, Sparkles, Trash2, Users, WandSparkles,
   AlertTriangle, CheckCircle2, SlidersHorizontal, X
 } from 'lucide-react';
 import './styles.css';
+import { API_URL, clearToken } from './lib/auth';
 
 const steps = ['School', 'Classes', 'Periods', 'Subjects', 'Teachers', 'Assignments', 'Review'];
 const quickClasses = ['Nursery', 'LKG', 'UKG', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12'];
 const subjectColors = { English: '#e4ad36', Hindi: '#d77751', Mathematics: '#4b8fd1', Science: '#78ad63', 'Social Studies': '#be6791', Computer: '#7d70c4', Art: '#e78963' };
 
 export function App({ organization, session }) {
-  const [step, setStep] = useState(0);
-  const [school, setSchool] = useState({ name: organization?.name || 'Laurels International School', year: organization?.academic_year || '2026–27' });
-  const [classes, setClasses] = useState(['Nursery', 'LKG', 'UKG', 'Class 1', 'Class 2', 'Class 3']);
-  const [sections, setSections] = useState({ Nursery: ['A'], LKG: ['A'], UKG: ['A'], 'Class 1': ['A'], 'Class 2': ['A'], 'Class 3': ['A'] });
+  const stepStorageKey = `schedulo_step_${organization?.school_id || 'draft'}`;
+  const [step, setStep] = useState(() => Number(window.localStorage.getItem(stepStorageKey) || 0));
+  const [school, setSchool] = useState({ name: organization?.name || '', year: organization?.academic_year || '' });
+  const [classes, setClasses] = useState([]);
+  const [sections, setSections] = useState({});
   const [days, setDays] = useState(5);
-  const [periods, setPeriods] = useState(8);
-  const [subjects, setSubjects] = useState(['English', 'Hindi', 'Mathematics', 'Science', 'Social Studies']);
-  const [frequencies, setFrequencies] = useState({ Nursery: { English: 4, Mathematics: 4, Hindi: 3 }, LKG: { English: 4, Mathematics: 4, Hindi: 3 } });
-  const [teachers, setTeachers] = useState([
-    { name: 'Anita Sharma', email: 'anita@laurels.edu', assignments: 3, initials: 'AS' },
-    { name: 'Rohan Mehta', email: 'rohan@laurels.edu', assignments: 2, initials: 'RM' },
-    { name: 'Priya Kapoor', email: 'priya@laurels.edu', assignments: 1, initials: 'PK' },
-  ]);
-  const [assignments, setAssignments] = useState([
-    { teacher: 'Anita Sharma', subject: 'English', className: 'Nursery A', periods: 4 },
-    { teacher: 'Rohan Mehta', subject: 'Mathematics', className: 'Nursery A', periods: 4 },
-    { teacher: 'Priya Kapoor', subject: 'Hindi', className: 'Nursery A', periods: 3 },
-  ]);
+  const [periods, setPeriods] = useState(0);
+  const [subjects, setSubjects] = useState([]);
+  const [frequencies, setFrequencies] = useState({});
+  const [teachers, setTeachers] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [customClass, setCustomClass] = useState('');
   const [showAddTeacher, setShowAddTeacher] = useState(false);
   const [toast, setToast] = useState('');
   const [schoolId, setSchoolId] = useState(organization?.school_id || null);
+  const [hydrated, setHydrated] = useState(false);
   const [apiStatus, setApiStatus] = useState('connected');
   const [generated, setGenerated] = useState(null);
 
@@ -43,19 +38,45 @@ export function App({ organization, session }) {
   const blockers = Math.max(0, totalSections * 3 - assignments.length - 4);
   const activeStep = steps[step];
 
+  useEffect(() => { window.localStorage.setItem(stepStorageKey, String(step)); }, [step, stepStorageKey]);
+
   const notify = (message) => { setToast(message); window.setTimeout(() => setToast(''), 2400); };
   const buildSetup = () => ({ days, periods, classes, sections, subjects, frequencies, teachers, assignments });
   const authHeaders = () => ({ 'Content-Type': 'application/json', ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}) });
   const saveSetup = async () => {
     if (!schoolId) return false;
-    const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/setup`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ name: school.name, academic_year: school.year, setup: buildSetup() }) });
+    const response = await fetch(`${API_URL}/api/v1/schools/${schoolId}/setup`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ name: school.name, academic_year: school.year, setup: buildSetup() }) });
     return response.ok;
   };
+  useEffect(() => {
+    if (!schoolId) return;
+    fetch(`${API_URL}/api/v1/schools/${schoolId}`, { headers: authHeaders() })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (!data) return;
+        setSchool({ name: data.name, year: data.academic_year });
+        const saved = data.setup || {};
+        if (saved.classes) setClasses(saved.classes);
+        if (saved.sections) setSections(saved.sections);
+        if (saved.days) setDays(saved.days);
+        if (saved.periods) setPeriods(saved.periods);
+        if (saved.subjects) setSubjects(saved.subjects);
+        if (saved.frequencies) setFrequencies(saved.frequencies);
+        if (saved.teachers) setTeachers(saved.teachers);
+        if (saved.assignments) setAssignments(saved.assignments);
+      })
+      .finally(() => setHydrated(true));
+  }, [schoolId]);
+  useEffect(() => {
+    if (!hydrated || !schoolId) return undefined;
+    const timer = window.setTimeout(() => saveSetup(), 500);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, schoolId, school, classes, sections, days, periods, subjects, frequencies, teachers, assignments]);
   const generate = async () => {
     try {
       const saved = await saveSetup();
       if (!saved) { notify('Start the backend with python run.py first'); return; }
-      const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/generate`, { method: 'POST', headers: authHeaders() });
+      const response = await fetch(`${API_URL}/api/v1/schools/${schoolId}/generate`, { method: 'POST', headers: authHeaders() });
       const result = await response.json();
       setGenerated(result);
       notify(result.status === 'INFEASIBLE' ? 'Fix the setup blockers before generating' : `Generated ${result.entries.length} timetable periods`);
@@ -83,24 +104,26 @@ export function App({ organization, session }) {
     <div className="app-shell">
       <Sidebar step={step} setStep={setStep} />
       <main className="main-shell">
-        <Topbar school={school} />
+        <Topbar school={school} session={session} />
         <div className="page-wrap">
-          <div className="eyebrow"><Sparkles size={14} /> SETUP WORKSPACE</div>
-          <div className="page-heading-row">
-            <div><h1>Build your timetable, calmly.</h1><p>Set up the essentials once. Schedulo will keep every class, teacher, and room in sync.</p></div>
-            <div className="save-state"><span className={`save-dot ${apiStatus}`} /> {apiStatus === 'connected' ? 'Connected to Schedulo API' : apiStatus === 'offline' ? 'Offline preview' : 'Connecting…'} <ChevronDown size={15} /></div>
-          </div>
-          <Stepper step={step} setStep={setStep} />
-          <section className="step-content">
-            {step === 0 && <SchoolStep school={school} setSchool={setSchool} />}
-            {step === 1 && <ClassesStep classes={classes} sections={sections} toggleClass={toggleClass} addSection={addSection} customClass={customClass} setCustomClass={setCustomClass} addCustomClass={addCustomClass} totalSections={totalSections} />}
-            {step === 2 && <PeriodsStep days={days} setDays={setDays} periods={periods} setPeriods={setPeriods} classes={classes} />}
-            {step === 3 && <SubjectsStep subjects={subjects} setSubjects={setSubjects} classes={classes} frequencies={frequencies} updateFrequency={updateFrequency} totalFrequency={totalFrequency} />}
-            {step === 4 && <TeachersStep teachers={teachers} setTeachers={setTeachers} assignments={assignments} setAssignments={setAssignments} showAddTeacher={showAddTeacher} setShowAddTeacher={setShowAddTeacher} notify={notify} />}
-            {step === 5 && <AssignmentsStep assignments={assignments} setAssignments={setAssignments} teachers={teachers} subjects={subjects} classes={classes} notify={notify} />}
-            {step === 6 && <ReviewStep school={school} schoolId={schoolId} classes={classes} totalSections={totalSections} days={days} periods={periods} subjects={subjects} teachers={teachers} assignments={assignments} blockers={blockers} setStep={setStep} notify={notify} generated={generated} onGenerate={generate} />}
-          </section>
-          <div className="wizard-footer"><button className="ghost-button" onClick={previous} disabled={step === 0}><ArrowLeft size={17} /> Back</button><div className="footer-note">{step === 6 ? 'Review the setup before generating' : 'You can return and edit this step later'}</div><button className="primary-button" onClick={next}>{step === 6 ? 'Save & generate' : 'Continue'} <ArrowRight size={17} /></button></div>
+          {step === -1 ? <DashboardStep school={school} classes={classes} totalSections={totalSections} subjects={subjects} teachers={teachers} assignments={assignments} blockers={blockers} generated={generated} onSetup={() => setStep(0)} /> : <>
+            <div className="eyebrow"><Sparkles size={14} /> SETUP WORKSPACE</div>
+            <div className="page-heading-row">
+              <div><h1>Build your timetable, calmly.</h1><p>Set up the essentials once. Schedulo will keep every class, teacher, and room in sync.</p></div>
+              <div className="save-state"><span className={`save-dot ${apiStatus}`} /> {apiStatus === 'connected' ? 'Connected to Schedulo API' : apiStatus === 'offline' ? 'Offline preview' : 'Connecting…'} <ChevronDown size={15} /></div>
+            </div>
+            <Stepper step={step} setStep={setStep} />
+            <section className="step-content">
+              {step === 0 && <SchoolStep school={school} setSchool={setSchool} />}
+              {step === 1 && <ClassesStep classes={classes} sections={sections} toggleClass={toggleClass} addSection={addSection} customClass={customClass} setCustomClass={setCustomClass} addCustomClass={addCustomClass} totalSections={totalSections} />}
+              {step === 2 && <PeriodsStep days={days} setDays={setDays} periods={periods} setPeriods={setPeriods} classes={classes} />}
+              {step === 3 && <SubjectsStep subjects={subjects} setSubjects={setSubjects} classes={classes} frequencies={frequencies} updateFrequency={updateFrequency} totalFrequency={totalFrequency} />}
+              {step === 4 && <TeachersStep teachers={teachers} setTeachers={setTeachers} assignments={assignments} setAssignments={setAssignments} showAddTeacher={showAddTeacher} setShowAddTeacher={setShowAddTeacher} notify={notify} />}
+              {step === 5 && <AssignmentsStep assignments={assignments} setAssignments={setAssignments} teachers={teachers} subjects={subjects} classes={classes} notify={notify} />}
+              {step === 6 && <ReviewStep school={school} schoolId={schoolId} classes={classes} totalSections={totalSections} days={days} periods={periods} subjects={subjects} teachers={teachers} assignments={assignments} blockers={blockers} setStep={setStep} notify={notify} generated={generated} onGenerate={generate} />}
+            </section>
+            <div className="wizard-footer"><button className="ghost-button" onClick={previous} disabled={step === 0}><ArrowLeft size={17} /> Back</button><div className="footer-note">{step === 6 ? 'Review the setup before generating' : 'You can return and edit this step later'}</div><button className="primary-button" onClick={next}>{step === 6 ? 'Save & generate' : 'Continue'} <ArrowRight size={17} /></button></div>
+          </>}
         </div>
       </main>
       {toast && <div className="toast"><CheckCircle2 size={17} /> {toast}</div>}
@@ -108,9 +131,19 @@ export function App({ organization, session }) {
   );
 }
 
+function DashboardStep({ school, classes, totalSections, subjects, teachers, assignments, blockers, generated, onSetup }) {
+  const metrics = [
+    { label: 'Classes', value: classes.length, icon: GraduationCap },
+    { label: 'Sections', value: totalSections, icon: LayoutDashboard },
+    { label: 'Subjects', value: subjects.length, icon: BookOpen },
+    { label: 'Teachers', value: teachers.length, icon: Users },
+  ];
+  return <div className="dashboard-view"><div className="eyebrow"><LayoutDashboard size={14} /> OVERVIEW</div><div className="page-heading-row"><div><h1>Welcome to {school.name || 'your workspace'}.</h1><p>Track setup progress and jump back into timetable planning whenever you’re ready.</p></div><button className="primary-button" onClick={onSetup}><WandSparkles size={16} /> Open setup wizard</button></div><div className="dashboard-metrics">{metrics.map(({ label, value, icon: Icon }) => <div className="dashboard-metric" key={label}><div className="card-icon blue"><Icon size={18} /></div><div><small>{label}</small><strong>{value}</strong></div></div>)}</div><div className="dashboard-grid"><Card icon={WandSparkles} title="Setup progress" description="Complete the essentials before generating your first timetable." accent={blockers ? 'yellow' : 'green'}><div className="progress-track"><span style={{ width: `${Math.min(100, Math.round(((classes.length > 0) + (subjects.length > 0) + (teachers.length > 0) + (assignments.length > 0)) / 4 * 100))}%` }} /></div><p className="dashboard-note">{blockers ? `${blockers} coverage items still need attention.` : 'Your setup is ready for timetable generation.'}</p><button className="secondary-button" onClick={onSetup}>Review setup <ArrowRight size={15} /></button></Card><Card icon={CalendarDays} title="Timetable status" description="Your generated timetable will appear here once the solver runs." accent="blue">{generated?.entries?.length ? <div className="dashboard-status ready"><CheckCircle2 size={18} /><div><strong>{generated.entries.length} periods generated</strong><small>Open the Review step to inspect the result.</small></div></div> : <div className="dashboard-status"><Clock3 size={18} /><div><strong>No timetable generated yet</strong><small>Finish setup and run the scheduler when ready.</small></div></div>}<button className="secondary-button" onClick={onSetup}>Continue planning <ArrowRight size={15} /></button></Card></div></div>;
+}
+
 function Sidebar({ step, setStep }) {
   const nav = [
-    { label: 'Dashboard', icon: LayoutDashboard, group: 'Overview' },
+    { label: 'Dashboard', icon: LayoutDashboard, group: 'Overview', step: -1 },
     { label: 'Setup wizard', icon: WandSparkles, group: 'Setup', step: 0 },
     { label: 'Classes', icon: GraduationCap, group: 'Setup', step: 1 },
     { label: 'Teachers', icon: Users, group: 'Setup', step: 4 },
@@ -125,12 +158,19 @@ function Sidebar({ step, setStep }) {
   let lastGroup = '';
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark"><CalendarDays size={23} strokeWidth={2.2} /></div><div><div className="brand-name">Schedulo</div><div className="brand-sub">SMART SCHEDULING</div></div></div>
-    <nav>{nav.map((item) => { const showGroup = item.group !== lastGroup; lastGroup = item.group; const Icon = item.icon; const active = item.step === step || (item.step === undefined && item.label === 'Dashboard' && step === -1); return <React.Fragment key={item.label}>{showGroup && <div className="nav-group">{item.group}</div>}<button className={`nav-item ${active ? 'active' : ''}`} onClick={() => item.step !== undefined && setStep(item.step)}><Icon size={18} /> <span>{item.label}</span>{item.label === 'Absences & substitutes' && <span className="nav-badge">2</span>}</button></React.Fragment>; })}</nav>
-    <div className="sidebar-bottom"><button className="collapse-button"><ChevronLeft size={17} /> Collapse</button><div className="help-link"><CircleHelp size={16} /> Help center</div></div>
+    <nav>{nav.map((item) => { const showGroup = item.group !== lastGroup; lastGroup = item.group; const Icon = item.icon; const active = item.step === step; return <React.Fragment key={item.label}>{showGroup && <div className="nav-group">{item.group}</div>}<button className={`nav-item ${active ? 'active' : ''}`} onClick={() => item.step !== undefined && setStep(item.step)}><Icon size={18} /> <span>{item.label}</span>{item.label === 'Absences & substitutes' && <span className="nav-badge">2</span>}</button></React.Fragment>; })}</nav>
+    <div className="sidebar-bottom"><div className="help-link"><CircleHelp size={16} /> Help center</div></div>
   </aside>;
 }
 
-function Topbar({ school }) { return <header className="topbar"><div className="school-context"><div className="school-icon"><Building2 size={18} /></div><div><strong>{school.name}</strong><span>{school.year} <b>Coordinator</b></span></div></div><div className="top-actions"><button className="icon-button"><CircleHelp size={18} /></button><div className="avatar">KM</div><ChevronDown size={16} /></div></header>; }
+function Topbar({ school, session }) {
+  const [open, setOpen] = useState(false);
+  const user = session?.user || {};
+  const displayName = user.full_name || user.email || 'Account';
+  const initials = displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+  const signOut = () => { clearToken(); window.location.href = '/login'; };
+  return <header className="topbar"><div className="school-context"><div className="school-icon"><Building2 size={17} /></div><div><strong>{school.name || 'Your organization'}</strong><span>{school.year || 'Academic year not set'}</span></div></div><div className="top-actions"><div className="profile-menu"><button className="profile-trigger" onClick={() => setOpen(!open)} aria-expanded={open}><div className="avatar">{initials}</div><ChevronDown size={15} className={open ? 'profile-chevron open' : 'profile-chevron'} /></button>{open && <div className="profile-dropdown"><strong>{displayName}</strong><small>{user.email || 'Signed in account'}</small><div className="profile-divider" /><button onClick={signOut}>Sign out</button></div>}</div></div></header>;
+}
 
 function Stepper({ step, setStep }) { return <div className="stepper">{steps.map((label, index) => <React.Fragment key={label}><button className={`step-chip ${index === step ? 'current' : ''} ${index < step ? 'complete' : ''}`} onClick={() => setStep(index)}><span>{index < step ? <Check size={14} /> : index + 1}</span>{label}</button>{index < steps.length - 1 && <div className={`step-line ${index < step ? 'complete' : ''}`} />}</React.Fragment>)}</div>; }
 
@@ -152,6 +192,6 @@ function ReviewStep({ school, schoolId, classes, totalSections, days, periods, s
 
 function SchedulePreview({ entries }) { const days = [...new Set(entries.map((entry) => entry.day))]; const periods = [...new Set(entries.map((entry) => entry.period))].sort((a, b) => a - b); return <Card icon={CalendarDays} title="Generated timetable" description="A live preview from the CP-SAT engine. Every class and teacher assignment comes from the same master schedule." accent="green"><div className="schedule-meta"><span><CheckCircle2 size={14} /> {entries.length} periods placed</span><span>Class view · sample output</span></div><div className="schedule-table"><div className="schedule-head"><span>Period</span>{days.map((day) => <span key={day}>{day.slice(0, 3)}</span>)}</div>{periods.map((period) => <div className="schedule-row" key={period}><strong>P{period}</strong>{days.map((day) => { const entry = entries.find((item) => item.day === day && item.period === period); return <div className="schedule-cell" key={`${day}-${period}`}>{entry ? <><b style={{ color: subjectColors[entry.subject] || '#3157d5' }}>{entry.subject}</b><small>{entry.className} · {entry.teacher}</small></> : <span>—</span>}</div>; })}</div>)}</div></Card>; }
 
-function AbsencePanel({ schoolId, teachers, notify }) { const [teacher, setTeacher] = useState(teachers[0]?.name || ''); const [date, setDate] = useState('2026-08-18'); const [result, setResult] = useState(null); const checkAbsence = async () => { if (!schoolId) { notify('Connect the backend before checking absences'); return; } const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/absences`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, teacher, reason: 'Planned absence' }) }); setResult(await response.json()); }; return <Card icon={Clock3} title="Daily absence coverage" description="Create a date-specific exception without changing the approved base timetable." accent="coral"><div className="absence-form"><label>Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label><label>Absent teacher<select value={teacher} onChange={(e) => setTeacher(e.target.value)}>{teachers.map((item) => <option key={item.name}>{item.name}</option>)}</select></label><button className="secondary-button" onClick={checkAbsence}><Users size={16} /> Find substitutes</button></div>{result && <div className="absence-result"><strong>{result.affected?.length || 0} affected periods</strong><span>Available substitutes: {result.candidates?.length ? result.candidates.join(', ') : 'No conflict-free candidates found'}</span></div>}</Card>; }
+function AbsencePanel({ schoolId, teachers, notify }) { const [teacher, setTeacher] = useState(''); const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10)); const [result, setResult] = useState(null); const checkAbsence = async () => { if (!schoolId || !teacher) { notify(!schoolId ? 'Connect the backend before checking absences' : 'Add a teacher first'); return; } const response = await fetch(`${API_URL}/api/v1/schools/${schoolId}/absences`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, teacher, reason: 'Planned absence' }) }); setResult(await response.json()); }; return <Card icon={Clock3} title="Daily absence coverage" description="Create a date-specific exception without changing the approved base timetable." accent="coral"><div className="absence-form"><label>Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label><label>Absent teacher<select value={teacher} onChange={(e) => setTeacher(e.target.value)}><option value="">Select a teacher</option>{teachers.map((item) => <option key={item.name}>{item.name}</option>)}</select></label><button className="secondary-button" onClick={checkAbsence}><Users size={16} /> Find substitutes</button></div>{result && <div className="absence-result"><strong>{result.affected?.length || 0} affected periods</strong><span>Available substitutes: {result.candidates?.length ? result.candidates.join(', ') : 'No conflict-free candidates found'}</span></div>}</Card>; }
 
 function Metric({ label, value, icon: Icon }) { return <div className="metric"><Icon size={18} /><div><small>{label}</small><strong>{value}</strong></div></div>; }
