@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowLeft, ArrowRight, BookOpen, Building2, CalendarDays, Check,
@@ -34,6 +34,9 @@ function App() {
   const [customClass, setCustomClass] = useState('');
   const [showAddTeacher, setShowAddTeacher] = useState(false);
   const [toast, setToast] = useState('');
+  const [schoolId, setSchoolId] = useState(null);
+  const [apiStatus, setApiStatus] = useState('connecting');
+  const [generated, setGenerated] = useState(null);
 
   const totalSections = Object.values(sections).reduce((sum, list) => sum + list.length, 0);
   const totalFrequency = Object.values(frequencies).reduce((sum, row) => sum + Object.values(row).reduce((a, b) => a + b, 0), 0);
@@ -41,6 +44,28 @@ function App() {
   const activeStep = steps[step];
 
   const notify = (message) => { setToast(message); window.setTimeout(() => setToast(''), 2400); };
+  const buildSetup = () => ({ days, periods, classes, sections, subjects, frequencies, teachers, assignments });
+  useEffect(() => {
+    fetch('http://localhost:8000/api/v1/schools', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: school.name, academic_year: school.year }) })
+      .then((response) => response.json())
+      .then((data) => { setSchoolId(data.id); setApiStatus('connected'); })
+      .catch(() => setApiStatus('offline'));
+  }, []);
+  const saveSetup = async () => {
+    if (!schoolId) return false;
+    const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/setup`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: school.name, academic_year: school.year, setup: buildSetup() }) });
+    return response.ok;
+  };
+  const generate = async () => {
+    try {
+      const saved = await saveSetup();
+      if (!saved) { notify('Start the backend with python run.py first'); return; }
+      const response = await fetch(`http://localhost:8000/api/v1/schools/${schoolId}/generate`, { method: 'POST' });
+      const result = await response.json();
+      setGenerated(result);
+      notify(result.status === 'INFEASIBLE' ? 'Fix the setup blockers before generating' : `Generated ${result.entries.length} timetable periods`);
+    } catch { notify('Backend is offline — run python run.py'); }
+  };
   const toggleClass = (name) => {
     if (classes.includes(name)) setClasses(classes.filter((item) => item !== name));
     else { setClasses([...classes, name]); setSections({ ...sections, [name]: ['A'] }); }
@@ -56,7 +81,7 @@ function App() {
     setFrequencies({ ...frequencies, [className]: { ...row, [subject]: Math.max(0, (row[subject] || 0) + delta) } });
   };
 
-  const next = () => { if (step < steps.length - 1) setStep(step + 1); else notify('Setup saved. Ready to generate your timetable.'); };
+  const next = async () => { await saveSetup(); if (step < steps.length - 1) setStep(step + 1); else await generate(); };
   const previous = () => setStep(Math.max(0, step - 1));
 
   return (
@@ -68,7 +93,7 @@ function App() {
           <div className="eyebrow"><Sparkles size={14} /> SETUP WORKSPACE</div>
           <div className="page-heading-row">
             <div><h1>Build your timetable, calmly.</h1><p>Set up the essentials once. Schedulo will keep every class, teacher, and room in sync.</p></div>
-            <div className="save-state"><span className="save-dot" /> Autosaved <ChevronDown size={15} /></div>
+            <div className="save-state"><span className={`save-dot ${apiStatus}`} /> {apiStatus === 'connected' ? 'Connected to Schedulo API' : apiStatus === 'offline' ? 'Offline preview' : 'Connecting…'} <ChevronDown size={15} /></div>
           </div>
           <Stepper step={step} setStep={setStep} />
           <section className="step-content">
@@ -78,7 +103,7 @@ function App() {
             {step === 3 && <SubjectsStep subjects={subjects} setSubjects={setSubjects} classes={classes} frequencies={frequencies} updateFrequency={updateFrequency} totalFrequency={totalFrequency} />}
             {step === 4 && <TeachersStep teachers={teachers} setTeachers={setTeachers} assignments={assignments} setAssignments={setAssignments} showAddTeacher={showAddTeacher} setShowAddTeacher={setShowAddTeacher} notify={notify} />}
             {step === 5 && <AssignmentsStep assignments={assignments} setAssignments={setAssignments} teachers={teachers} subjects={subjects} classes={classes} notify={notify} />}
-            {step === 6 && <ReviewStep school={school} classes={classes} totalSections={totalSections} days={days} periods={periods} subjects={subjects} teachers={teachers} assignments={assignments} blockers={blockers} setStep={setStep} notify={notify} />}
+            {step === 6 && <ReviewStep school={school} classes={classes} totalSections={totalSections} days={days} periods={periods} subjects={subjects} teachers={teachers} assignments={assignments} blockers={blockers} setStep={setStep} notify={notify} generated={generated} onGenerate={generate} />}
           </section>
           <div className="wizard-footer"><button className="ghost-button" onClick={previous} disabled={step === 0}><ArrowLeft size={17} /> Back</button><div className="footer-note">{step === 6 ? 'Review the setup before generating' : 'You can return and edit this step later'}</div><button className="primary-button" onClick={next}>{step === 6 ? 'Save & generate' : 'Continue'} <ArrowRight size={17} /></button></div>
         </div>
@@ -128,7 +153,7 @@ function TeachersStep({ teachers, setTeachers, assignments, setAssignments, show
 
 function AssignmentsStep({ assignments, setAssignments, teachers, subjects, classes, notify }) { const [form, setForm] = useState({ teacher: teachers[0]?.name || '', subject: subjects[0] || '', className: `${classes[0] || 'Class'} A`, periods: 3 }); const addAssignment = () => { setAssignments([...assignments, { ...form, periods: Number(form.periods) }]); notify('Teaching assignment added'); }; return <div className="stack"><Card icon={SlidersHorizontal} title="Teaching assignments" description="Connect each teacher, subject, class, and weekly period requirement." accent="coral"><div className="assignment-form"><label>Teacher<select value={form.teacher} onChange={(e) => setForm({ ...form, teacher: e.target.value })}>{teachers.map((teacher) => <option key={teacher.name}>{teacher.name}</option>)}</select></label><label>Subject<select value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>Class<select value={form.className} onChange={(e) => setForm({ ...form, className: e.target.value })}>{classes.map((name) => <option key={name}>{name} A</option>)}</select></label><label>Periods / week<input type="number" min="1" max="12" value={form.periods} onChange={(e) => setForm({ ...form, periods: e.target.value })} /></label><button className="primary-button" onClick={addAssignment}><Plus size={16} /> Add</button></div><div className="assignment-list">{assignments.map((item, index) => <div className="assignment-row" key={`${item.teacher}-${item.subject}-${index}`}><span className="subject-swatch tiny" style={{ background: subjectColors[item.subject] || '#6b7fc1' }} /><div><strong>{item.subject}</strong><small>{item.className} · {item.teacher}</small></div><b>{item.periods} / wk</b><button className="icon-button" onClick={() => setAssignments(assignments.filter((_, i) => i !== index))}><Trash2 size={15} /></button></div>)}</div></Card><Card icon={SlidersHorizontal} title="Scheduling rules" description="Start with a few powerful rules. Add advanced rules after the first draft." accent="yellow"><div className="rule-list"><label className="toggle-row"><span><strong>Spread core subjects</strong><small>Prefer one core subject per day where possible.</small></span><input type="checkbox" defaultChecked /></label><label className="toggle-row"><span><strong>Protect teacher breaks</strong><small>Avoid more than three consecutive periods.</small></span><input type="checkbox" defaultChecked /></label><label className="toggle-row"><span><strong>Keep double periods together</strong><small>Useful for labs and practical sessions.</small></span><input type="checkbox" /></label></div></Card></div>; }
 
-function ReviewStep({ school, classes, totalSections, days, periods, subjects, teachers, assignments, blockers, setStep, notify }) { const cards = [{ label: 'School', value: school.name, sub: school.year, icon: Building2, step: 0, accent: 'blue' }, { label: 'Classes', value: `${classes.length} classes`, sub: `${totalSections} sections`, icon: GraduationCap, step: 1, accent: 'coral' }, { label: 'Periods', value: `${periods} regular`, sub: `${days}-day week`, icon: Clock3, step: 2, accent: 'yellow' }, { label: 'Subjects', value: `${subjects.length} subjects`, sub: 'Library ready', icon: BookOpen, step: 3, accent: 'blue' }, { label: 'Teachers', value: `${teachers.length} teachers`, sub: `${assignments.length} assignments`, icon: Users, step: 4, accent: 'coral' }, { label: 'Coverage', value: blockers ? `${blockers} blockers` : 'Ready to generate', sub: blockers ? 'Fix missing assignments' : 'All essentials covered', icon: blockers ? AlertTriangle : CheckCircle2, step: 5, accent: blockers ? 'red' : 'green' }]; return <div className="stack"><div className={`review-banner ${blockers ? 'warning' : 'ready'}`}><div className="review-banner-icon">{blockers ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}</div><div><h2>{blockers ? 'A few things need attention' : 'Your setup is ready'}</h2><p>{blockers ? `${blockers} coverage items stand between you and a generated timetable. Fix them below or jump to the relevant step.` : 'All essentials are covered. You can generate a first timetable now.'}</p></div></div><div className="review-grid">{cards.map((card) => { const Icon = card.icon; return <button className="review-card" key={card.label} onClick={() => setStep(card.step)}><div className={`card-icon ${card.accent}`}><Icon size={18} /></div><div className="mini-label">{card.label}</div><strong>{card.value}</strong><small>{card.sub}</small><ChevronRight size={16} className="review-arrow" /></button>; })}</div><Card icon={AlertTriangle} title="Pre-flight checks" description="Schedulo will run these checks again before the solver starts." accent="red"><div className="check-list"><div><CheckCircle2 size={17} /><span>No class double-booking</span><b>Ready</b></div><div><CheckCircle2 size={17} /><span>Teacher availability</span><b>Ready</b></div><div><CheckCircle2 size={17} /><span>Subject coverage</span><b>{blockers ? 'Review' : 'Ready'}</b></div></div><button className="primary-button generate-button" onClick={() => notify(blockers ? 'Fix coverage blockers before generating' : 'Solver queued — generation coming next')}><Sparkles size={17} /> Generate timetable</button></Card></div>; }
+function ReviewStep({ school, classes, totalSections, days, periods, subjects, teachers, assignments, blockers, setStep, notify, generated, onGenerate }) { const cards = [{ label: 'School', value: school.name, sub: school.year, icon: Building2, step: 0, accent: 'blue' }, { label: 'Classes', value: `${classes.length} classes`, sub: `${totalSections} sections`, icon: GraduationCap, step: 1, accent: 'coral' }, { label: 'Periods', value: `${periods} regular`, sub: `${days}-day week`, icon: Clock3, step: 2, accent: 'yellow' }, { label: 'Subjects', value: `${subjects.length} subjects`, sub: 'Library ready', icon: BookOpen, step: 3, accent: 'blue' }, { label: 'Teachers', value: `${teachers.length} teachers`, sub: `${assignments.length} assignments`, icon: Users, step: 4, accent: 'coral' }, { label: 'Coverage', value: blockers ? `${blockers} blockers` : 'Ready to generate', sub: blockers ? 'Fix missing assignments' : 'All essentials covered', icon: blockers ? AlertTriangle : CheckCircle2, step: 5, accent: blockers ? 'red' : 'green' }]; return <div className="stack"><div className={`review-banner ${blockers ? 'warning' : 'ready'}`}><div className="review-banner-icon">{blockers ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}</div><div><h2>{blockers ? 'A few things need attention' : 'Your setup is ready'}</h2><p>{blockers ? `${blockers} coverage items stand between you and a generated timetable. Fix them below or jump to the relevant step.` : 'All essentials are covered. You can generate a first timetable now.'}</p></div></div><div className="review-grid">{cards.map((card) => { const Icon = card.icon; return <button className="review-card" key={card.label} onClick={() => setStep(card.step)}><div className={`card-icon ${card.accent}`}><Icon size={18} /></div><div className="mini-label">{card.label}</div><strong>{card.value}</strong><small>{card.sub}</small><ChevronRight size={16} className="review-arrow" /></button>; })}</div><Card icon={AlertTriangle} title="Pre-flight checks" description="Schedulo will run these checks again before the solver starts." accent="red"><div className="check-list"><div><CheckCircle2 size={17} /><span>No class double-booking</span><b>Ready</b></div><div><CheckCircle2 size={17} /><span>Teacher availability</span><b>Ready</b></div><div><CheckCircle2 size={17} /><span>Subject coverage</span><b>{blockers ? 'Review' : 'Ready'}</b></div></div><button className="primary-button generate-button" onClick={onGenerate}><Sparkles size={17} /> Generate timetable</button>{generated && <div className={`generation-result ${generated.status === 'INFEASIBLE' ? 'failed' : ''}`}><strong>{generated.status === 'INFEASIBLE' ? 'Generation needs attention' : `Generated ${generated.entries.length} periods`}</strong><span>{generated.status === 'INFEASIBLE' ? generated.diagnostics?.[0] : `Solver finished in ${generated.solveSeconds || '—'} seconds.`}</span></div>}</Card></div>; }
 
 function Metric({ label, value, icon: Icon }) { return <div className="metric"><Icon size={18} /><div><small>{label}</small><strong>{value}</strong></div></div>; }
 
