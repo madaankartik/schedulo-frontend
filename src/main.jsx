@@ -1339,6 +1339,19 @@ function TeachersStep({
                 {assignments.filter((item) => item.teacher === teacher.name).length} assignments
               </span>
               <button
+                className="ghost-button small teacher-add-assignment"
+                onClick={() => {
+                  setExpandedTeacher(teacher.name);
+                  setAssignmentDraft({
+                    subject: subjects[0] || "",
+                    className: classes[0] ? `${classes[0]} A` : "",
+                    periods: 3,
+                  });
+                }}
+              >
+                <Plus size={13} /> Add subject/class
+              </button>
+              <button
                 className="icon-button"
                 title="Edit teacher"
                 onClick={() => startEdit(teacher)}
