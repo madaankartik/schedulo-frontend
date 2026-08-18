@@ -97,7 +97,6 @@ export function App({ organization, session }) {
   const [toast, setToast] = useState("");
   const [schoolId, setSchoolId] = useState(organization?.school_id || null);
   const [hydrated, setHydrated] = useState(false);
-  const [apiStatus, setApiStatus] = useState("connected");
   const [generated, setGenerated] = useState(null);
 
   const totalSections = Object.values(sections).reduce(
@@ -313,15 +312,6 @@ export function App({ organization, session }) {
                     Set up the essentials once. Schedulo will keep every class,
                     teacher, and room in sync.
                   </p>
-                </div>
-                <div className="save-state">
-                  <span className={`save-dot ${apiStatus}`} />{" "}
-                  {apiStatus === "connected"
-                    ? "Connected to Schedulo API"
-                    : apiStatus === "offline"
-                      ? "Offline preview"
-                      : "Connecting…"}{" "}
-                  <ChevronDown size={15} />
                 </div>
               </div>
               <Stepper step={step} setStep={setStep} />
