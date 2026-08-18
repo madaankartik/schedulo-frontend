@@ -34,7 +34,6 @@ const steps = [
   "Periods",
   "Subjects",
   "Teachers",
-  "Assignments",
   "Review",
 ];
 const quickClasses = [
@@ -425,22 +424,14 @@ export function App({ organization, session }) {
                     setTeachers={setTeachers}
                     assignments={assignments}
                     setAssignments={setAssignments}
+                    subjects={subjects}
+                    classes={classes}
                     showAddTeacher={showAddTeacher}
                     setShowAddTeacher={setShowAddTeacher}
                     notify={notify}
                   />
                 )}
                 {step === 5 && (
-                  <AssignmentsStep
-                    assignments={assignments}
-                    setAssignments={setAssignments}
-                    teachers={teachers}
-                    subjects={subjects}
-                    classes={classes}
-                    notify={notify}
-                  />
-                )}
-                {step === 6 && (
                   <ReviewStep
                     school={school}
                     schoolId={schoolId}
@@ -469,12 +460,12 @@ export function App({ organization, session }) {
                   <ArrowLeft size={17} /> Back
                 </button>
                 <div className="footer-note">
-                  {step === 6
+                  {step === 5
                     ? "Review the setup before generating"
                     : "You can return and edit this step later"}
                 </div>
                 <button className="primary-button" onClick={next}>
-                  {step === 6 ? "Save & generate" : "Continue"}{" "}
+                  {step === 5 ? "Save & generate" : "Continue"}{" "}
                   <ArrowRight size={17} />
                 </button>
               </div>
@@ -600,8 +591,8 @@ function Sidebar({ step, setStep }) {
     { label: "Classes", icon: GraduationCap, group: "Setup", step: 1 },
     { label: "Teachers", icon: Users, group: "Setup", step: 4 },
     { label: "Subjects", icon: BookOpen, group: "Setup", step: 3 },
-    { label: "Generate timetable", icon: Sparkles, group: "Schedule", step: 6 },
-    { label: "View timetable", icon: CalendarDays, group: "Schedule", step: 6 },
+    { label: "Generate timetable", icon: Sparkles, group: "Schedule", step: 5 },
+    { label: "View timetable", icon: CalendarDays, group: "Schedule", step: 5 },
     { label: "Adjustments", icon: SlidersHorizontal, group: "Schedule" },
     {
       label: "Absences & substitutes",
@@ -1152,12 +1143,20 @@ function TeachersStep({
   setTeachers,
   assignments,
   setAssignments,
+  subjects,
+  classes,
   showAddTeacher,
   setShowAddTeacher,
   notify,
 }) {
   const [draft, setDraft] = useState({ name: "", email: "" });
   const [editing, setEditing] = useState(null);
+  const [expandedTeacher, setExpandedTeacher] = useState(null);
+  const [assignmentDraft, setAssignmentDraft] = useState({
+    subject: subjects[0] || "",
+    className: classes[0] ? `${classes[0]} A` : "",
+    periods: 3,
+  });
   const addTeacher = () => {
     if (!draft.name.trim()) return;
     setTeachers([
@@ -1220,6 +1219,26 @@ function TeachersStep({
     setTeachers(teachers.filter((item) => item !== teacher));
     setAssignments(assignments.filter((item) => item.teacher !== teacher.name));
     notify("Teacher deleted");
+  };
+  const addTeacherAssignment = (teacher) => {
+    if (!assignmentDraft.subject || !assignmentDraft.className) return;
+    const duplicate = assignments.some(
+      (item) =>
+        item.teacher === teacher.name &&
+        item.subject === assignmentDraft.subject &&
+        item.className === assignmentDraft.className,
+    );
+    if (duplicate) return notify("This assignment already exists");
+    setAssignments([
+      ...assignments,
+      {
+        teacher: teacher.name,
+        subject: assignmentDraft.subject,
+        className: assignmentDraft.className,
+        periods: Number(assignmentDraft.periods),
+      },
+    ]);
+    notify("Teaching assignment added");
   };
   return (
     <div className="stack">
@@ -1298,14 +1317,26 @@ function TeachersStep({
         </div>
         <div className="teacher-list">
           {teachers.map((teacher) => (
-            <div className="teacher-row" key={teacher.email || teacher.name}>
+            <React.Fragment key={teacher.email || teacher.name}>
+            <div className="teacher-row">
               <div className="teacher-avatar">{teacher.initials}</div>
-              <div className="teacher-info">
+              <button
+                type="button"
+                className="teacher-info teacher-expand-trigger"
+                onClick={() => {
+                  setExpandedTeacher(expandedTeacher === teacher.name ? null : teacher.name);
+                  setAssignmentDraft({
+                    subject: subjects[0] || "",
+                    className: classes[0] ? `${classes[0]} A` : "",
+                    periods: 3,
+                  });
+                }}
+              >
                 <strong>{teacher.name}</strong>
                 <small>{teacher.email || "No email added"}</small>
-              </div>
+              </button>
               <span className="teacher-periods">
-                {teacher.assignments} assignments
+                {assignments.filter((item) => item.teacher === teacher.name).length} assignments
               </span>
               <button
                 className="icon-button"
@@ -1322,6 +1353,45 @@ function TeachersStep({
                 <Trash2 size={16} />
               </button>
             </div>
+            {expandedTeacher === teacher.name && (
+              <div className="teacher-assignment-panel">
+                <div className="mini-label">ADD SUBJECT / CLASS</div>
+                <div className="teacher-assignment-form">
+                  <select
+                    value={assignmentDraft.subject}
+                    onChange={(e) => setAssignmentDraft({ ...assignmentDraft, subject: e.target.value })}
+                  >
+                    <option value="">Select subject</option>
+                    {subjects.map((subject) => <option key={subject}>{subject}</option>)}
+                  </select>
+                  <select
+                    value={assignmentDraft.className}
+                    onChange={(e) => setAssignmentDraft({ ...assignmentDraft, className: e.target.value })}
+                  >
+                    <option value="">Select class</option>
+                    {classes.map((name) => <option key={name}>{name} A</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    max="12"
+                    value={assignmentDraft.periods}
+                    onChange={(e) => setAssignmentDraft({ ...assignmentDraft, periods: e.target.value })}
+                    aria-label="Periods per week"
+                  />
+                  <button className="primary-button small" onClick={() => addTeacherAssignment(teacher)}>
+                    <Plus size={14} /> Add
+                  </button>
+                </div>
+                {assignments.filter((item) => item.teacher === teacher.name).map((item, index) => (
+                  <div className="teacher-assignment-row" key={`${item.subject}-${item.className}-${index}`}>
+                    <span>{item.subject}</span><small>{item.className} · {item.periods}/wk</small>
+                    <button className="icon-button" onClick={() => setAssignments(assignments.filter((candidate) => candidate !== item))}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            </React.Fragment>
           ))}
         </div>
       </Card>

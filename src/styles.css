@@ -155,3 +155,10 @@ nav { padding-top:16px; }
 .list-row > .muted-action:hover { background:#f3f1ec; color:var(--coral); }
 .section-name { display:inline-flex !important; align-items:center; gap:4px; color:inherit; font-size:inherit; }
 .section-name-input { width:72px; min-width:0; padding:2px 4px; border:1px solid #9eafe8; border-radius:4px; background:#fff; color:var(--blue); font-size:11px; }
+.teacher-expand-trigger { border:0; background:transparent; padding:0; text-align:left; color:inherit; cursor:pointer; }
+.teacher-expand-trigger:hover strong { color:var(--blue); }
+.teacher-assignment-panel { margin:0 14px 12px 60px; padding:12px 14px; border:1px dashed #cad3e6; border-radius:10px; background:var(--blue-soft); }
+.teacher-assignment-form { display:grid; grid-template-columns:1fr 1fr 90px auto; gap:8px; align-items:center; }
+.teacher-assignment-form select, .teacher-assignment-form input { min-height:34px; }
+.teacher-assignment-row { display:flex; align-items:center; gap:10px; margin-top:8px; padding:8px 10px; border:1px solid #dfe3e7; border-radius:7px; background:#fff; font-size:11px; }
+.teacher-assignment-row span { font-weight:700; flex:1; }.teacher-assignment-row small { color:var(--muted); }
