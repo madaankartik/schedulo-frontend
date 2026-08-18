@@ -99,7 +99,7 @@ export function App({ organization, session }) {
   const [generated, setGenerated] = useState(null);
 
   const totalSections = Object.values(sections).reduce(
-    (sum, list) => sum + list.length,
+    (sum, list) => sum + (Array.isArray(list) ? list.length : 0),
     0,
   );
   const totalFrequency = Object.values(frequencies).reduce(
@@ -191,7 +191,16 @@ export function App({ organization, session }) {
         setSchool({ name: data.name, year: data.academic_year });
         const saved = data.setup || {};
         if (saved.classes) setClasses(saved.classes);
-        if (saved.sections) setSections(saved.sections);
+        if (saved.sections) {
+          const activeClasses = new Set(saved.classes || []);
+          setSections(
+            Object.fromEntries(
+              Object.entries(saved.sections).filter(([name]) =>
+                activeClasses.has(name),
+              ),
+            ),
+          );
+        }
         if (saved.days) setDays(saved.days);
         if (saved.periods) setPeriods(saved.periods);
         if (saved.subjects) setSubjects(saved.subjects);
@@ -241,9 +250,14 @@ export function App({ organization, session }) {
     }
   };
   const toggleClass = (name) => {
-    if (classes.includes(name))
+    if (classes.includes(name)) {
       setClasses(classes.filter((item) => item !== name));
-    else {
+      setSections(
+        Object.fromEntries(
+          Object.entries(sections).filter(([className]) => className !== name),
+        ),
+      );
+    } else {
       setClasses([...classes, name]);
       setSections({ ...sections, [name]: ["A"] });
     }
