@@ -269,6 +269,26 @@ export function App({ organization, session }) {
     setSections({ ...sections, [value]: ["A"] });
     setCustomClass("");
   };
+  const removeClass = (name) => {
+    setClasses(classes.filter((item) => item !== name));
+    setSections(
+      Object.fromEntries(
+        Object.entries(sections).filter(([className]) => className !== name),
+      ),
+    );
+    setFrequencies(
+      Object.fromEntries(
+        Object.entries(frequencies).filter(([className]) => className !== name),
+      ),
+    );
+    setAssignments(
+      assignments.filter(
+        (item) =>
+          item.className !== name &&
+          !item.className?.startsWith(`${name} ·`),
+      ),
+    );
+  };
   const addSection = (className) =>
     setSections({
       ...sections,
@@ -277,6 +297,14 @@ export function App({ organization, session }) {
         String.fromCharCode(65 + (sections[className]?.length || 0)),
       ],
     });
+  const removeSection = (className, section) => {
+    const current = sections[className] || [];
+    if (current.length <= 1) return;
+    setSections({
+      ...sections,
+      [className]: current.filter((item) => item !== section),
+    });
+  };
   const updateFrequency = (className, subject, delta) => {
     const row = frequencies[className] || {};
     setFrequencies({
@@ -337,7 +365,9 @@ export function App({ organization, session }) {
                     classes={classes}
                     sections={sections}
                     toggleClass={toggleClass}
+                    removeClass={removeClass}
                     addSection={addSection}
+                    removeSection={removeSection}
                     customClass={customClass}
                     setCustomClass={setCustomClass}
                     addCustomClass={addCustomClass}
@@ -735,7 +765,9 @@ function ClassesStep({
   classes,
   sections,
   toggleClass,
+  removeClass,
   addSection,
+  removeSection,
   customClass,
   setCustomClass,
   addCustomClass,
@@ -807,7 +839,12 @@ function ClassesStep({
                 {(sections[name] || []).map((section) => (
                   <span key={section}>
                     {section}
-                    <button onClick={() => {}}>
+                    <button
+                      type="button"
+                      onClick={() => removeSection(name, section)}
+                      disabled={sections[name]?.length <= 1}
+                      aria-label={`Remove section ${section} from ${name}`}
+                    >
                       <X size={11} />
                     </button>
                   </span>
@@ -816,7 +853,14 @@ function ClassesStep({
                   <Plus size={14} /> Section
                 </button>
               </div>
-              <Trash2 size={16} className="muted-action" />
+              <button
+                type="button"
+                className="muted-action"
+                onClick={() => removeClass(name)}
+                aria-label={`Delete ${name}`}
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           ))}
         </div>
