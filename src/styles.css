@@ -151,3 +151,5 @@ nav { padding-top:16px; }
 .common-subject:hover { border-color:#aab8ec; color:var(--blue); background:var(--blue-soft); }
 .common-subject.selected { border-color:#aab8ec; color:var(--blue); background:var(--blue-soft); }
 .wizard-footer { border-top:0; }
+.list-row > .muted-action { border:0; background:transparent; padding:4px; display:grid; place-items:center; color:#a3acb4; border-radius:6px; }
+.list-row > .muted-action:hover { background:#f3f1ec; color:var(--coral); }
