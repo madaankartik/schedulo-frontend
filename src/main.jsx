@@ -65,6 +65,19 @@ const commonSubjects = [
   "Physical Education",
   "Music",
 ];
+const classOrder = new Map(quickClasses.map((name, index) => [name, index]));
+const sortClasses = (items) =>
+  [...items].sort((a, b) => {
+    const aIndex = classOrder.get(a);
+    const bIndex = classOrder.get(b);
+    if (aIndex !== undefined || bIndex !== undefined) {
+      return (aIndex ?? quickClasses.length) - (bIndex ?? quickClasses.length);
+    }
+    return a.localeCompare(b, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
 const subjectColors = {
   English: "#e4ad36",
   Hindi: "#d77751",
@@ -788,6 +801,7 @@ function ClassesStep({
 }) {
   const [editingSection, setEditingSection] = useState(null);
   const [sectionDraft, setSectionDraft] = useState("");
+  const orderedClasses = sortClasses(classes);
   const beginSectionEdit = (className, section) => {
     setEditingSection(`${className}:${section}`);
     setSectionDraft(section);
@@ -848,7 +862,7 @@ function ClassesStep({
         accent="yellow"
       >
         <div className="list-card">
-          {classes.map((name) => (
+          {orderedClasses.map((name) => (
             <div className="list-row" key={name}>
               <div>
                 <strong>{name}</strong>
