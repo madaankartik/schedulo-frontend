@@ -719,30 +719,6 @@ function SchoolStep({ school, setSchool }) {
           </div>
         </div>
       </Card>
-      <Card
-        icon={SlidersHorizontal}
-        title="Scheduling style"
-        description="Choose the defaults Schedulo should use when generating your first draft."
-        accent="coral"
-      >
-        <div className="option-grid">
-          <button className="option selected">
-            <span className="option-dot" />
-            <div>
-              <strong>Balanced week</strong>
-              <small>Spread core subjects and protect teacher breaks.</small>
-            </div>
-            <Check size={17} />
-          </button>
-          <button className="option">
-            <span className="option-dot" />
-            <div>
-              <strong>Compact day</strong>
-              <small>Prefer fewer gaps and tighter teaching blocks.</small>
-            </div>
-          </button>
-        </div>
-      </Card>
     </div>
   );
 }
