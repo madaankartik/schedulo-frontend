@@ -9,7 +9,7 @@ export function AuthGate() {
 
   useEffect(() => {
     const callbackToken = new URLSearchParams(window.location.search).get('token');
-    if (window.location.pathname === '/oauth/callback' && callbackToken) {
+    if (callbackToken) {
       setToken(callbackToken);
       window.history.replaceState({}, '', '/');
     }
@@ -61,7 +61,7 @@ export function AuthScreen({ configured }) {
     }
     try {
       await authenticate(mode === 'signin' ? 'login' : 'signup', { email, password, ...(mode === 'signup' ? { full_name: fullName } : {}) });
-      window.location.reload();
+      window.location.assign('/');
     } catch (authError) { setError(authError.message); }
   };
   const signInWithGoogle = async () => {
