@@ -13,6 +13,7 @@ import {
   GraduationCap,
   LayoutDashboard,
   Menu,
+  Pencil,
   Plus,
   Settings2,
   Sparkles,
@@ -305,6 +306,16 @@ export function App({ organization, session }) {
       [className]: current.filter((item) => item !== section),
     });
   };
+  const updateSection = (className, oldName, nextName) => {
+    const value = nextName.trim();
+    const current = sections[className] || [];
+    if (!value || (value !== oldName && current.includes(value))) return false;
+    setSections({
+      ...sections,
+      [className]: current.map((item) => (item === oldName ? value : item)),
+    });
+    return true;
+  };
   const updateFrequency = (className, subject, delta) => {
     const row = frequencies[className] || {};
     setFrequencies({
@@ -368,6 +379,7 @@ export function App({ organization, session }) {
                     removeClass={removeClass}
                     addSection={addSection}
                     removeSection={removeSection}
+                    updateSection={updateSection}
                     customClass={customClass}
                     setCustomClass={setCustomClass}
                     addCustomClass={addCustomClass}
@@ -768,11 +780,21 @@ function ClassesStep({
   removeClass,
   addSection,
   removeSection,
+  updateSection,
   customClass,
   setCustomClass,
   addCustomClass,
   totalSections,
 }) {
+  const [editingSection, setEditingSection] = useState(null);
+  const [sectionDraft, setSectionDraft] = useState("");
+  const beginSectionEdit = (className, section) => {
+    setEditingSection(`${className}:${section}`);
+    setSectionDraft(section);
+  };
+  const finishSectionEdit = (className, section) => {
+    if (updateSection(className, section, sectionDraft)) setEditingSection(null);
+  };
   return (
     <div className="stack">
       <Card
@@ -838,7 +860,30 @@ function ClassesStep({
               <div className="section-pills">
                 {(sections[name] || []).map((section) => (
                   <span key={section}>
-                    {section}
+                    {editingSection === `${name}:${section}` ? (
+                      <input
+                        className="section-name-input"
+                        value={sectionDraft}
+                        autoFocus
+                        onChange={(e) => setSectionDraft(e.target.value)}
+                        onBlur={() => finishSectionEdit(name, section)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") finishSectionEdit(name, section);
+                          if (e.key === "Escape") setEditingSection(null);
+                        }}
+                        aria-label={`Rename section ${section}`}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="section-name"
+                        onClick={() => beginSectionEdit(name, section)}
+                        title="Rename section"
+                      >
+                        {section}
+                        <Pencil size={10} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeSection(name, section)}

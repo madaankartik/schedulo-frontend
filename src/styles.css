@@ -153,3 +153,5 @@ nav { padding-top:16px; }
 .wizard-footer { border-top:0; }
 .list-row > .muted-action { border:0; background:transparent; padding:4px; display:grid; place-items:center; color:#a3acb4; border-radius:6px; }
 .list-row > .muted-action:hover { background:#f3f1ec; color:var(--coral); }
+.section-name { display:inline-flex !important; align-items:center; gap:4px; color:inherit; font-size:inherit; }
+.section-name-input { width:72px; min-width:0; padding:2px 4px; border:1px solid #9eafe8; border-radius:4px; background:#fff; color:var(--blue); font-size:11px; }
