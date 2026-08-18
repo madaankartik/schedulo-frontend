@@ -143,3 +143,10 @@ nav { padding-top:16px; }
 .dashboard-status strong, .dashboard-status small { display:block; }
 .dashboard-status strong { color:var(--ink); font-size:13px; }
 .dashboard-status small { color:var(--muted); font-size:11px; margin-top:4px; }
+
+.subject-quick-label { margin-top:0; }
+.subject-custom-label { margin-top:18px; margin-bottom:8px; }
+.common-subjects { display:flex; flex-wrap:wrap; gap:7px; }
+.common-subject { display:inline-flex; align-items:center; gap:5px; border:1px solid #dfe3e7; border-radius:9px; padding:8px 10px; background:#fff; color:var(--muted); font-size:11px; font-weight:700; transition:background .18s ease, border-color .18s ease, color .18s ease; }
+.common-subject:hover { border-color:#aab8ec; color:var(--blue); background:var(--blue-soft); }
+.common-subject.selected { border-color:#aab8ec; color:var(--blue); background:var(--blue-soft); }
