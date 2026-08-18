@@ -9,7 +9,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  CircleHelp,
   Clock3,
   GraduationCap,
   LayoutDashboard,
@@ -577,11 +576,6 @@ function Sidebar({ step, setStep }) {
           );
         })}
       </nav>
-      <div className="sidebar-bottom">
-        <div className="help-link">
-          <CircleHelp size={16} /> Help center
-        </div>
-      </div>
     </aside>
   );
 }
