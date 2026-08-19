@@ -1597,6 +1597,19 @@ function ReviewStep({
   generated,
   onGenerate,
 }) {
+  const weeklyCapacity = days * periods;
+  const classLoads = assignments.reduce((loads, item) => ({ ...loads, [item.className]: (loads[item.className] || 0) + Number(item.periods || 0) }), {});
+  const teacherLoads = assignments.reduce((loads, item) => ({ ...loads, [item.teacher]: (loads[item.teacher] || 0) + Number(item.periods || 0) }), {});
+  const issues = [];
+  if (!classes.length) issues.push({ title: "No classes added", detail: "Add at least one class and section before generating.", step: 1 });
+  if (!periods) issues.push({ title: "Periods per day is missing", detail: "Set the number of teaching periods in the Periods step.", step: 2 });
+  if (!subjects.length) issues.push({ title: "No subjects added", detail: "Add the subjects your classes will study.", step: 3 });
+  if (!teachers.length) issues.push({ title: "No teachers added", detail: "Add the teachers who will appear in the timetable.", step: 4 });
+  if (!assignments.length) issues.push({ title: "No teaching assignments", detail: "Add at least one subject, class, and teacher assignment.", step: 4 });
+  Object.entries(classLoads).forEach(([name, load]) => { if (weeklyCapacity && load > weeklyCapacity) issues.push({ title: `${name} has too many periods`, detail: `${load} assigned periods but only ${weeklyCapacity} slots are available this week.`, step: 4 }); });
+  Object.entries(teacherLoads).forEach(([name, load]) => { if (weeklyCapacity && load > weeklyCapacity) issues.push({ title: `${name} is over capacity`, detail: `${load} assigned periods but only ${weeklyCapacity} teaching slots are available.`, step: 4 }); });
+  assignments.forEach((item) => { if (Number(item.periods || 0) > days * 2) issues.push({ title: `${item.subject} frequency is too high`, detail: `${item.periods} periods/week exceeds the maximum of ${days * 2} supported for one assignment.`, step: 3 }); });
+  const hasIssues = issues.length > 0;
   const cards = [
     {
       label: "School",
@@ -1640,27 +1653,26 @@ function ReviewStep({
     },
     {
       label: "Coverage",
-      value: blockers ? `${blockers} blockers` : "Ready to generate",
-      sub: blockers ? "Fix setup issues" : "All essentials covered",
-      icon: blockers ? AlertTriangle : CheckCircle2,
+      value: hasIssues ? `${issues.length} issues` : "Ready to generate",
+      sub: hasIssues ? "See fixes below" : "All essentials covered",
+      icon: hasIssues ? AlertTriangle : CheckCircle2,
       step: 5,
       accent: blockers ? "red" : "green",
     },
   ];
-  const status = (issue) => (issue ? "Review" : "Ready");
   return (
     <div className="stack">
-      <div className={`review-banner ${blockers ? "warning" : "ready"}`}>
+      <div className={`review-banner ${hasIssues ? "warning" : "ready"}`}>
         <div className="review-banner-icon">
-          {blockers ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}
+          {hasIssues ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}
         </div>
         <div>
           <h2>
-            {blockers ? "A few things need attention" : "Your setup is ready"}
+            {hasIssues ? `${issues.length} things need attention` : "Your setup is ready"}
           </h2>
           <p>
-            {blockers
-              ? "Some constraints cannot fit in the current weekly capacity. Review the flagged checks below."
+            {hasIssues
+              ? "Fix the specific items below before generating your timetable."
               : "All essentials are covered. You can generate a first timetable now."}
           </p>
         </div>
@@ -1691,28 +1703,19 @@ function ReviewStep({
         description="These checks explain why the solver may fail before generation starts."
         accent="red"
       >
-        <div className="check-list">
-          <div>
-            <CheckCircle2 size={17} />
-            <span>No class double-booking</span>
-            <b>{status(preflight.classCapacity)}</b>
+        {hasIssues ? (
+          <div className="blocker-list">
+            {issues.map((issue, index) => (
+              <div className="blocker-item" key={`${issue.title}-${index}`}>
+                <AlertTriangle size={17} />
+                <div><strong>{issue.title}</strong><small>{issue.detail}</small></div>
+                <button className="ghost-button small" onClick={() => setStep(issue.step)}>Fix</button>
+              </div>
+            ))}
           </div>
-          <div>
-            <CheckCircle2 size={17} />
-            <span>Teacher availability</span>
-            <b>{status(preflight.teacherCapacity)}</b>
-          </div>
-          <div>
-            <CheckCircle2 size={17} />
-            <span>Subject frequency fits working days</span>
-            <b>{status(preflight.frequency)}</b>
-          </div>
-          <div>
-            <CheckCircle2 size={17} />
-            <span>Subject and teacher coverage</span>
-            <b>{status(preflight.coverage)}</b>
-          </div>
-        </div>
+        ) : (
+          <div className="all-clear"><CheckCircle2 size={17} /><strong>Everything required is ready.</strong><span>Schedulo can generate a timetable without any known setup blockers.</span></div>
+        )}
         <button className="primary-button generate-button" onClick={onGenerate}>
           <Sparkles size={17} /> Generate timetable
         </button>

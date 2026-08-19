@@ -162,3 +162,7 @@ nav { padding-top:16px; }
 .teacher-assignment-form select, .teacher-assignment-form input { min-height:34px; }
 .teacher-assignment-row { display:flex; align-items:center; gap:10px; margin-top:8px; padding:8px 10px; border:1px solid #dfe3e7; border-radius:7px; background:#fff; font-size:11px; }
 .teacher-assignment-row span { font-weight:700; flex:1; }.teacher-assignment-row small { color:var(--muted); }
+.blocker-list { border:1px solid #edc1c4; border-radius:12px; overflow:hidden; }
+.blocker-item { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid #f1d9da; background:#fffafa; }
+.blocker-item:last-child { border-bottom:0; }.blocker-item > svg { flex:0 0 auto; color:var(--red); }.blocker-item > div { flex:1; }.blocker-item strong, .blocker-item small { display:block; }.blocker-item strong { color:var(--ink); font-size:12px; }.blocker-item small { color:#7d8794; font-size:10px; line-height:1.45; margin-top:3px; }.blocker-item .ghost-button { color:var(--red); }
+.all-clear { display:flex; align-items:center; gap:8px; padding:14px; border:1px solid #b8dfd1; border-radius:10px; background:var(--green-soft); color:var(--green); font-size:11px; }.all-clear strong { color:var(--ink); }.all-clear span { color:#738091; }
