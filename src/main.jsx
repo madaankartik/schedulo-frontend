@@ -2192,10 +2192,33 @@ function TimetableView({ generated, classes, school, onGenerate }) {
 }
 
 function SchedulePreview({ entries }) {
-  const classNames = [...new Set(entries.map((entry) => entry.className))];
-  const [selectedClass, setSelectedClass] = useState(classNames[0] || "");
-  const classEntries = entries.filter(
-    (entry) => entry.className === selectedClass,
+  const classNames = useMemo(
+    () => [...new Set(entries.map((entry) => entry.className))],
+    [entries],
+  );
+  const teacherNames = useMemo(
+    () => [...new Set(entries.map((entry) => entry.teacher).filter(Boolean))],
+    [entries],
+  );
+  const [viewMode, setViewMode] = useState("class");
+  const options = useMemo(
+    () => (viewMode === "class" ? classNames : teacherNames),
+    [classNames, teacherNames, viewMode],
+  );
+  const [selectedOption, setSelectedOption] = useState(options[0] || "");
+  useEffect(() => {
+    if (!options.length) {
+      setSelectedOption("");
+      return;
+    }
+    if (!selectedOption || !options.includes(selectedOption)) {
+      setSelectedOption(options[0]);
+    }
+  }, [options, selectedOption]);
+  const visibleEntries = entries.filter((entry) =>
+    viewMode === "class"
+      ? entry.className === selectedOption
+      : entry.teacher === selectedOption,
   );
   const dayOrder = [
     "Monday",
@@ -2206,52 +2229,97 @@ function SchedulePreview({ entries }) {
     "Saturday",
   ];
   const days = dayOrder.filter((day) =>
-    classEntries.some((entry) => entry.day === day),
+    entries.some((entry) => entry.day === day),
   );
-  const periods = [...new Set(classEntries.map((entry) => entry.period))].sort(
+  const periods = [...new Set(entries.map((entry) => entry.period))].sort(
     (a, b) => a - b,
   );
+  const gridColumns = {
+    gridTemplateColumns: `70px repeat(${Math.max(days.length, 1)}, minmax(118px, 1fr))`,
+  };
+  const totalSlots = days.length * periods.length;
+  const selectedLoad = visibleEntries.length;
+  const selectedFreeSlots = Math.max(0, totalSlots - selectedLoad);
   return (
     <Card
       icon={CalendarDays}
       title="Generated timetable"
-      description="Each class has its own timetable. Choose a class to view its weekly schedule."
+      description="Switch between class-wise and teacher-wise views from the same master schedule."
       accent="green"
     >
       <div className="schedule-meta">
         <span>
           <CheckCircle2 size={14} /> {entries.length} periods placed
         </span>
-        <span>{classNames.length} class timetables</span>
+        <span>{classNames.length} class views · {teacherNames.length} teacher views</span>
+      </div>
+      <div className="schedule-toolbar">
+        <div className="schedule-mode-toggle" aria-label="Timetable view mode">
+          <button
+            type="button"
+            className={viewMode === "class" ? "active" : ""}
+            onClick={() => setViewMode("class")}
+          >
+            <GraduationCap size={14} /> Class wise
+          </button>
+          <button
+            type="button"
+            className={viewMode === "teacher" ? "active" : ""}
+            onClick={() => setViewMode("teacher")}
+          >
+            <Users size={14} /> Teacher wise
+          </button>
+        </div>
+        <div className="schedule-context-summary">
+          <strong>{selectedOption || "No timetable selected"}</strong>
+          <span>{selectedLoad} periods · {selectedFreeSlots} free slots</span>
+        </div>
       </div>
       <div className="class-tabs schedule-class-tabs">
-        {classNames.map((name) => (
+        {options.map((name) => (
           <button
-            className={selectedClass === name ? "active" : ""}
+            className={selectedOption === name ? "active" : ""}
             key={name}
-            onClick={() => setSelectedClass(name)}
+            onClick={() => setSelectedOption(name)}
           >
             {name}
           </button>
         ))}
       </div>
       <div className="schedule-table">
-        <div className="schedule-head">
+        <div className="schedule-head" style={gridColumns}>
           <span>Period</span>
           {days.map((day) => (
             <span key={day}>{day.slice(0, 3)}</span>
           ))}
         </div>
         {periods.map((period) => (
-          <div className="schedule-row" key={period}>
+          <div className="schedule-row" style={gridColumns} key={period}>
             <strong>P{period}</strong>
             {days.map((day) => {
-              const entry = classEntries.find(
+              const slotEntries = visibleEntries.filter(
                 (item) => item.day === day && item.period === period,
               );
+              const entry = slotEntries[0];
               return (
-                <div className="schedule-cell" key={`${day}-${period}`}>
-                  {entry ? (
+                <div
+                  className={`schedule-cell ${slotEntries.length > 1 ? "conflict" : ""}`}
+                  key={`${day}-${period}`}
+                >
+                  {slotEntries.length > 1 ? (
+                    <>
+                      <b>Conflict</b>
+                      <small>
+                        {slotEntries
+                          .map((item) =>
+                            viewMode === "class"
+                              ? `${item.subject} · ${item.teacher}`
+                              : `${item.subject} · ${item.className}`,
+                          )
+                          .join(" + ")}
+                      </small>
+                    </>
+                  ) : entry ? (
                     <>
                       <b
                         style={{
@@ -2260,10 +2328,12 @@ function SchedulePreview({ entries }) {
                       >
                         {entry.subject}
                       </b>
-                      <small>{entry.teacher}</small>
+                      <small>
+                        {viewMode === "class" ? entry.teacher : entry.className}
+                      </small>
                     </>
                   ) : (
-                    <span>—</span>
+                    <span>Free period</span>
                   )}
                 </div>
               );
