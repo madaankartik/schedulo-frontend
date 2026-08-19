@@ -1564,6 +1564,10 @@ function TeachersStep({
               <button
                 className="ghost-button small teacher-add-assignment"
                 onClick={() => {
+                  if (expandedTeacher === teacher.name) {
+                    setExpandedTeacher(null);
+                    return;
+                  }
                   setExpandedTeacher(teacher.name);
                   setAssignmentDraft({
                     subject: subjects[0] || "",
@@ -1572,7 +1576,14 @@ function TeachersStep({
                   });
                 }}
               >
-                <Plus size={13} /> Add subject/class
+                {expandedTeacher === teacher.name ? (
+                  <X size={13} />
+                ) : (
+                  <Plus size={13} />
+                )}
+                {expandedTeacher === teacher.name
+                  ? "Hide details"
+                  : "Add subject/class"}
               </button>
               <button
                 className="icon-button"
@@ -1591,7 +1602,18 @@ function TeachersStep({
             </div>
             {expandedTeacher === teacher.name && (
               <div className="teacher-assignment-panel">
-                <div className="mini-label">ADD SUBJECT / CLASS</div>
+                <div className="teacher-panel-head">
+                  <div>
+                    <div className="mini-label">ADD SUBJECT / CLASS</div>
+                    <small>Only this teacher’s assignments are expanded.</small>
+                  </div>
+                  <button
+                    className="ghost-button small"
+                    onClick={() => setExpandedTeacher(null)}
+                  >
+                    Done
+                  </button>
+                </div>
                 <div className="teacher-assignment-form">
                   <select
                     value={assignmentDraft.subject}
