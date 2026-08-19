@@ -111,6 +111,7 @@ export function App({ organization, session }) {
   const [hydrated, setHydrated] = useState(false);
   const [generated, setGenerated] = useState(null);
   const [page, setPage] = useState("setup");
+  const [generating, setGenerating] = useState(false);
 
   const totalSections = Object.values(sections).reduce(
     (sum, list) => sum + (Array.isArray(list) ? list.length : 0),
@@ -197,6 +198,15 @@ export function App({ organization, session }) {
     );
     return response.ok;
   };
+  const saveSetupInBackground = () => {
+    saveSetup()
+      .then((saved) => {
+        if (!saved) notify("Changes are saved locally. Backend sync is offline.");
+      })
+      .catch(() =>
+        notify("Changes are saved locally. Backend sync is offline."),
+      );
+  };
   useEffect(() => {
     if (!schoolId) return;
     fetch(`${API_URL}/api/v1/schools/${schoolId}`, { headers: authHeaders() })
@@ -245,6 +255,8 @@ export function App({ organization, session }) {
     generated,
   ]);
   const generate = async () => {
+    if (generating) return;
+    setGenerating(true);
     try {
       const saved = await saveSetup();
       if (!saved) {
@@ -264,6 +276,8 @@ export function App({ organization, session }) {
       );
     } catch {
       notify("Backend is offline — run python run.py");
+    } finally {
+      setGenerating(false);
     }
   };
   const toggleClass = (name) => {
@@ -343,10 +357,13 @@ export function App({ organization, session }) {
     });
   };
 
-  const next = async () => {
-    await saveSetup();
-    if (step < steps.length - 1) setStep(step + 1);
-    else await generate();
+  const next = () => {
+    if (step < steps.length - 1) {
+      setStep((current) => Math.min(current + 1, steps.length - 1));
+      saveSetupInBackground();
+      return;
+    }
+    generate();
   };
   const previous = () => setStep(Math.max(0, step - 1));
 
@@ -464,6 +481,7 @@ export function App({ organization, session }) {
                     notify={notify}
                     generated={generated}
                     onGenerate={generate}
+                    generating={generating}
                   />
                 )}
               </section>
@@ -480,8 +498,16 @@ export function App({ organization, session }) {
                     ? "Review the setup before generating"
                     : "You can return and edit this step later"}
                 </div>
-                <button className="primary-button" onClick={next}>
-                  {step === 5 ? "Save & generate" : "Continue"}{" "}
+                <button
+                  className="primary-button"
+                  onClick={next}
+                  disabled={step === 5 && generating}
+                >
+                  {step === 5
+                    ? generating
+                      ? "Generating..."
+                      : "Save & generate"
+                    : "Continue"}{" "}
                   <ArrowRight size={17} />
                 </button>
               </div>
@@ -1596,6 +1622,7 @@ function ReviewStep({
   notify,
   generated,
   onGenerate,
+  generating,
 }) {
   const weeklyCapacity = days * periods;
   const classLoads = assignments.reduce((loads, item) => ({ ...loads, [item.className]: (loads[item.className] || 0) + Number(item.periods || 0) }), {});
@@ -1716,8 +1743,12 @@ function ReviewStep({
         ) : (
           <div className="all-clear"><CheckCircle2 size={17} /><strong>Everything required is ready.</strong><span>Schedulo can generate a timetable without any known setup blockers.</span></div>
         )}
-        <button className="primary-button generate-button" onClick={onGenerate}>
-          <Sparkles size={17} /> Generate timetable
+        <button
+          className="primary-button generate-button"
+          onClick={onGenerate}
+          disabled={generating}
+        >
+          <Sparkles size={17} /> {generating ? "Generating..." : "Generate timetable"}
         </button>
         {generated && (
           <div
