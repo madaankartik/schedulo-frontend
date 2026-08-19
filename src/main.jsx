@@ -425,6 +425,22 @@ export function App({ organization, session }) {
       },
     });
   };
+  const applyFrequencyPatternToAll = (sourceClass) => {
+    if (!sourceClass || !classes.length) return;
+    const sourceRow = frequencies[sourceClass] || {};
+    const pattern = Object.fromEntries(
+      subjects.map((subject) => [
+        subject,
+        Math.max(0, Number(sourceRow[subject] || 0)),
+      ]),
+    );
+    setFrequencies(
+      Object.fromEntries(
+        classes.map((className) => [className, { ...pattern }]),
+      ),
+    );
+    notify(`${sourceClass} subject periods applied to every class`);
+  };
 
   const next = () => {
     if (step < steps.length - 1) {
@@ -517,6 +533,7 @@ export function App({ organization, session }) {
                     classes={classes}
                     frequencies={frequencies}
                     updateFrequency={updateFrequency}
+                    applyFrequencyPatternToAll={applyFrequencyPatternToAll}
                     totalFrequency={totalFrequency}
                     days={days}
                     periods={periods}
@@ -1140,6 +1157,7 @@ function SubjectsStep({
   classes,
   frequencies,
   updateFrequency,
+  applyFrequencyPatternToAll,
   totalFrequency,
   days,
   periods,
@@ -1237,6 +1255,8 @@ function SubjectsStep({
               (a, b) => a + b,
               0,
             );
+            const classCapacity =
+              days * classDailyPeriods(classPeriods, periods, name, classes);
             return (
               <button
                 className={selectedClass === name ? "active" : ""}
@@ -1245,7 +1265,7 @@ function SubjectsStep({
               >
                 {name}
                 <small>
-                  {total}/{capacity}
+                  {total}/{classCapacity}
                 </small>
               </button>
             );
@@ -1253,9 +1273,18 @@ function SubjectsStep({
         </div>
         <div className="coverage-line">
           <span>{selectedClass || "Select a class"}</span>
-          <b>
-            {totalForClass} / {capacity} periods per week
-          </b>
+          <div className="frequency-actions">
+            <button
+              className="secondary-button small"
+              onClick={() => applyFrequencyPatternToAll(selectedClass)}
+              disabled={!selectedClass || classes.length < 2 || !subjects.length}
+            >
+              <WandSparkles size={14} /> Apply to all classes
+            </button>
+            <b>
+              {totalForClass} / {capacity} periods per week
+            </b>
+          </div>
         </div>
         <div className="frequency-list">
           {subjects.map((subject) => (
