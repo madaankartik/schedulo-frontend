@@ -1165,6 +1165,15 @@ function SubjectsStep({
 }) {
   const [newSubject, setNewSubject] = useState("");
   const [selectedClass, setSelectedClass] = useState(classes[0]);
+  useEffect(() => {
+    if (!classes.length) {
+      setSelectedClass("");
+      return;
+    }
+    if (!selectedClass || !classes.includes(selectedClass)) {
+      setSelectedClass(classes[0]);
+    }
+  }, [classes, selectedClass]);
   const addSubject = () => {
     if (newSubject.trim() && !subjects.includes(newSubject.trim())) {
       setSubjects([...subjects, newSubject.trim()]);
