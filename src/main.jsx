@@ -93,6 +93,11 @@ const subjectColors = {
   Computer: "#7d70c4",
   Art: "#e78963",
 };
+const todayInputValue = () => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 10);
+};
 
 export function App({ organization, session }) {
   const stepStorageKey = `schedulo_step_${organization?.school_id || "draft"}`;
@@ -250,7 +255,16 @@ export function App({ organization, session }) {
     if (saved.frequencies) setFrequencies(saved.frequencies);
     if (saved.teachers) setTeachers(saved.teachers);
     if (saved.assignments) setAssignments(saved.assignments);
-    if (saved.generated) setGenerated(saved.generated);
+    if (Array.isArray(data.timetable) && data.timetable.length) {
+      setGenerated({
+        ...(saved.generated || {}),
+        status: saved.generated?.status || "SAVED",
+        entries: data.timetable,
+        diagnostics: saved.generated?.diagnostics || [],
+      });
+    } else if (saved.generated) {
+      setGenerated(saved.generated);
+    }
   };
   const saveSetup = async () => {
     const draft = writeSetupDraft();
@@ -469,7 +483,21 @@ export function App({ organization, session }) {
               }}
             />
           ) : null}
-          {page !== "view" && (step === -1 ? (
+          {page === "absences" ? (
+            <AbsencesPage
+              schoolId={schoolId}
+              school={school}
+              teachers={teachers}
+              generated={generated}
+              session={session}
+              notify={notify}
+              onGenerate={() => {
+                setPage("setup");
+                setStep(5);
+              }}
+            />
+          ) : null}
+          {page === "setup" && (step === -1 ? (
             <DashboardStep
               school={school}
               classes={classes}
@@ -727,12 +755,13 @@ function Sidebar({ step, setStep, page, setPage }) {
     { label: "Teachers", icon: Users, group: "Setup", step: 4 },
     { label: "Subjects", icon: BookOpen, group: "Setup", step: 3 },
     { label: "Generate timetable", icon: Sparkles, group: "Schedule", step: 5 },
-    { label: "View timetable", icon: CalendarDays, group: "Schedule", step: 5 },
+    { label: "View timetable", icon: CalendarDays, group: "Schedule", page: "view" },
     { label: "Adjustments", icon: SlidersHorizontal, group: "Schedule" },
     {
       label: "Absences & substitutes",
       icon: Clock3,
       group: "Daily operations",
+      page: "absences",
     },
     { label: "Teacher workload", icon: Settings2, group: "Insights" },
     { label: "Settings", icon: Settings2, group: "Account" },
@@ -754,15 +783,15 @@ function Sidebar({ step, setStep, page, setPage }) {
           const showGroup = item.group !== lastGroup;
           lastGroup = item.group;
           const Icon = item.icon;
-          const active = item.label === "View timetable" ? page === "view" : page !== "view" && item.step === step;
+          const active = item.page ? page === item.page : page === "setup" && item.step === step;
           return (
             <React.Fragment key={item.label}>
               {showGroup && <div className="nav-group">{item.group}</div>}
               <button
                 className={`nav-item ${active ? "active" : ""}`}
                 onClick={() => {
-                  if (item.label === "View timetable") {
-                    setPage("view");
+                  if (item.page) {
+                    setPage(item.page);
                     return;
                   }
                   setPage("setup");
@@ -770,9 +799,6 @@ function Sidebar({ step, setStep, page, setPage }) {
                 }}
               >
                 <Icon size={18} /> <span>{item.label}</span>
-                {item.label === "Absences & substitutes" && (
-                  <span className="nav-badge">2</span>
-                )}
               </button>
             </React.Fragment>
           );
@@ -2345,70 +2371,486 @@ function SchedulePreview({ entries }) {
   );
 }
 
-function AbsencePanel({ schoolId, teachers, notify }) {
-  const [teacher, setTeacher] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [result, setResult] = useState(null);
-  const checkAbsence = async () => {
-    if (!schoolId || !teacher) {
-      notify(
-        !schoolId
-          ? "Connect the backend before checking absences"
-          : "Add a teacher first",
-      );
+function AbsencesPage({
+  schoolId,
+  school,
+  teachers,
+  generated,
+  session,
+  notify,
+  onGenerate,
+}) {
+  const [date, setDate] = useState(todayInputValue);
+  const [selectedTeacher, setSelectedTeacher] = useState("");
+  const [reason, setReason] = useState("");
+  const [absences, setAbsences] = useState([]);
+  const [plan, setPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const teacherOptions = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...teachers.map((teacher) => teacher.name).filter(Boolean),
+          ...(generated?.entries || [])
+            .map((entry) => entry.teacher)
+            .filter(Boolean),
+        ]),
+      ],
+    [teachers, generated],
+  );
+  const hasBaseTimetable = Boolean(generated?.entries?.length);
+  const availableTeacherOptions = useMemo(
+    () =>
+      teacherOptions.filter(
+        (teacher) => !absences.some((absence) => absence.teacher === teacher),
+      ),
+    [teacherOptions, absences],
+  );
+  const formattedDate = date
+    ? new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "selected date";
+  const authHeaders = () => ({
+    "Content-Type": "application/json",
+    ...(session?.access_token
+      ? { Authorization: `Bearer ${session.access_token}` }
+      : {}),
+  });
+  const summarisePlan = (nextPlan) => {
+    const items = nextPlan.items || [];
+    const covered = items.filter((item) => item.status === "covered").length;
+    return {
+      ...nextPlan,
+      summary: {
+        ...(nextPlan.summary || {}),
+        absentTeachers: nextPlan.absences?.length || 0,
+        totalAffected: items.length,
+        covered,
+        needsAttention: Math.max(0, items.length - covered),
+      },
+    };
+  };
+
+  useEffect(() => {
+    if (!availableTeacherOptions.length) {
+      if (selectedTeacher) setSelectedTeacher("");
       return;
     }
+    if (!selectedTeacher || !availableTeacherOptions.includes(selectedTeacher)) {
+      setSelectedTeacher(availableTeacherOptions[0]);
+    }
+  }, [availableTeacherOptions, selectedTeacher]);
+
+  useEffect(() => {
+    let active = true;
+    if (!schoolId || !date) return undefined;
+    fetch(
+      `${API_URL}/api/v1/schools/${schoolId}/absences?date=${encodeURIComponent(date)}`,
+      { headers: authHeaders() },
+    )
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        const hasSavedPlan = Boolean(data.saved || data.items?.length);
+        setAbsences(data.absences || []);
+        setPlan(hasSavedPlan ? data : null);
+        setMessage(
+          data.saved
+            ? `Saved daily coverage loaded for ${data.day || formattedDate}.`
+            : "",
+        );
+      })
+      .catch(() => {
+        if (active) setMessage("Could not load saved absence plan yet.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [schoolId, date, formattedDate, session?.access_token]);
+
+  const requestPlan = async (mode, substitutions = []) => {
     const response = await fetch(
-      `${API_URL}/api/v1/schools/${schoolId}/absences`,
+      `${API_URL}/api/v1/schools/${schoolId}/absences${mode === "preview" ? "/preview" : ""}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, teacher, reason: "Planned absence" }),
+        headers: authHeaders(),
+        body: JSON.stringify({
+          date,
+          absences,
+          ...(mode === "save" ? { substitutions } : {}),
+        }),
       },
     );
-    setResult(await response.json());
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.detail || "Could not calculate substitutes");
+    }
+    return result;
   };
+
+  const addAbsence = () => {
+    if (!selectedTeacher) {
+      setMessage("Pick a teacher first.");
+      return;
+    }
+    if (absences.some((absence) => absence.teacher === selectedTeacher)) {
+      setMessage(`${selectedTeacher} is already marked absent.`);
+      return;
+    }
+    setAbsences([
+      ...absences,
+      { teacher: selectedTeacher, reason: reason.trim() },
+    ]);
+    setReason("");
+    setPlan(null);
+    setMessage("Added. Run coverage to find substitutes.");
+  };
+
+  const removeAbsence = (teacher) => {
+    setAbsences(absences.filter((absence) => absence.teacher !== teacher));
+    setPlan(null);
+    setMessage("Absence list updated. Run coverage again.");
+  };
+
+  const updateAbsenceReason = (teacher, value) => {
+    setAbsences(
+      absences.map((absence) =>
+        absence.teacher === teacher ? { ...absence, reason: value } : absence,
+      ),
+    );
+  };
+
+  const previewPlan = async () => {
+    if (!schoolId) {
+      setMessage("Create an organization before using daily operations.");
+      return null;
+    }
+    if (!absences.length) {
+      setMessage("Add at least one absent teacher.");
+      return null;
+    }
+    setLoading(true);
+    setMessage("");
+    try {
+      const result = await requestPlan("preview");
+      setPlan(result);
+      setMessage(
+        result.summary.totalAffected
+          ? `Found ${result.summary.totalAffected} affected period${result.summary.totalAffected === 1 ? "" : "s"} on ${result.day}.`
+          : `No classes found for the selected teacher${absences.length === 1 ? "" : "s"} on ${result.day}.`,
+      );
+      return result;
+    } catch (error) {
+      setMessage(error.message);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const savePlan = async () => {
+    if (!absences.length) {
+      setMessage("Add at least one absent teacher before saving.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const planToSave = plan || (await previewPlan());
+      if (!planToSave) return;
+      const result = await requestPlan("save", planToSave.items || []);
+      setPlan(result);
+      setMessage("Saved. This daily plan will load again for this date.");
+      notify("Daily substitute plan saved");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateSubstitute = (index, substitute) => {
+    setPlan((current) => {
+      if (!current) return current;
+      const next = {
+        ...current,
+        items: current.items.map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                substitute,
+                status: substitute ? "covered" : "needs_attention",
+                reason: substitute
+                  ? item.candidates?.find((candidate) => candidate.teacher === substitute)
+                      ?.reason || "Manually selected substitute"
+                  : "No substitute selected",
+              }
+            : item,
+        ),
+      };
+      return summarisePlan(next);
+    });
+  };
+
   return (
-    <Card
-      icon={Clock3}
-      title="Daily absence coverage"
-      description="Create a date-specific exception without changing the approved base timetable."
-      accent="coral"
-    >
-      <div className="absence-form">
-        <label>
-          Date
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
-        <label>
-          Absent teacher
-          <select value={teacher} onChange={(e) => setTeacher(e.target.value)}>
-            <option value="">Select a teacher</option>
-            {teachers.map((item) => (
-              <option key={item.name}>{item.name}</option>
-            ))}
-          </select>
-        </label>
-        <button className="secondary-button" onClick={checkAbsence}>
-          <Users size={16} /> Find substitutes
-        </button>
+    <div className="stack absence-page">
+      <div className="eyebrow">
+        <Clock3 size={14} /> DAILY OPERATIONS
       </div>
-      {result && (
-        <div className="absence-result">
-          <strong>{result.affected?.length || 0} affected periods</strong>
+      <div className="page-heading-row">
+        <div>
+          <h1>Absences & substitutes.</h1>
+          <p>
+            Create a date-specific coverage plan for staff absences. This does
+            not edit your approved base timetable.
+          </p>
+        </div>
+      </div>
+
+      <div className="safe-note">
+        <CheckCircle2 size={17} />
+        <div>
+          <strong>Base timetable stays protected</strong>
           <span>
-            Available substitutes:{" "}
-            {result.candidates?.length
-              ? result.candidates.join(", ")
-              : "No conflict-free candidates found"}
+            Daily substitute plans are saved separately for each date, so
+            Generate timetable and View timetable remain unchanged.
           </span>
         </div>
+      </div>
+
+      {!hasBaseTimetable ? (
+        <Card
+          icon={CalendarDays}
+          title="Generate the base timetable first"
+          description="Daily substitutions need a saved timetable to know which classes are affected."
+          accent="blue"
+        >
+          <button className="primary-button" onClick={onGenerate}>
+            <Sparkles size={16} /> Go to generator
+          </button>
+        </Card>
+      ) : (
+        <>
+          <Card
+            icon={Clock3}
+            title="Mark today’s absences"
+            description={`Choose absent teachers for ${school.name || "your organization"} and preview the affected periods.`}
+            accent="coral"
+            className="absence-control-card"
+          >
+            <div className="absence-form-grid">
+              <label>
+                Coverage date
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(event) => {
+                    setDate(event.target.value);
+                    setMessage("");
+                  }}
+                />
+              </label>
+              <label>
+                Absent teacher
+                <select
+                  value={selectedTeacher}
+                  onChange={(event) => setSelectedTeacher(event.target.value)}
+                  disabled={!availableTeacherOptions.length}
+                >
+                  {availableTeacherOptions.length ? (
+                    availableTeacherOptions.map((teacher) => (
+                      <option key={teacher}>{teacher}</option>
+                    ))
+                  ) : (
+                    <option>No available teachers</option>
+                  )}
+                </select>
+              </label>
+              <label>
+                Reason
+                <input
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="Optional note"
+                />
+              </label>
+              <button
+                className="secondary-button absence-add-button"
+                onClick={addAbsence}
+                disabled={!availableTeacherOptions.length}
+              >
+                <Plus size={16} /> Add absent
+              </button>
+            </div>
+
+            {absences.length ? (
+              <div className="absence-chip-list">
+                {absences.map((absence) => (
+                  <div className="absence-chip" key={absence.teacher}>
+                    <div>
+                      <strong>{absence.teacher}</strong>
+                      <input
+                        value={absence.reason || ""}
+                        onChange={(event) =>
+                          updateAbsenceReason(absence.teacher, event.target.value)
+                        }
+                        placeholder="Reason or note"
+                      />
+                    </div>
+                    <button
+                      className="icon-button"
+                      onClick={() => removeAbsence(absence.teacher)}
+                      title={`Remove ${absence.teacher}`}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state compact">
+                Pick one or more absent teachers, then run coverage.
+              </div>
+            )}
+
+            <div className="absence-actions">
+              <button
+                className="secondary-button"
+                onClick={previewPlan}
+                disabled={loading || !absences.length}
+              >
+                <Users size={16} /> {loading ? "Finding..." : "Find substitutes"}
+              </button>
+              <button
+                className="primary-button"
+                onClick={savePlan}
+                disabled={saving || !absences.length}
+              >
+                <Check size={16} /> {saving ? "Saving..." : "Save daily plan"}
+              </button>
+            </div>
+            {message && <div className="absence-inline-message">{message}</div>}
+          </Card>
+
+          {plan ? (
+            <Card
+              icon={Users}
+              title="Coverage plan"
+              description={`${formattedDate}${plan.day ? ` · ${plan.day}` : ""}. Review each affected period before saving.`}
+              accent={plan.summary?.needsAttention ? "yellow" : "green"}
+              className="absence-results-card"
+            >
+              <div className="absence-summary-grid">
+                <div>
+                  <span>Absent teachers</span>
+                  <strong>{plan.summary?.absentTeachers || 0}</strong>
+                </div>
+                <div>
+                  <span>Affected periods</span>
+                  <strong>{plan.summary?.totalAffected || 0}</strong>
+                </div>
+                <div className="good">
+                  <span>Auto-covered</span>
+                  <strong>{plan.summary?.covered || 0}</strong>
+                </div>
+                <div className={plan.summary?.needsAttention ? "warn" : "good"}>
+                  <span>Need attention</span>
+                  <strong>{plan.summary?.needsAttention || 0}</strong>
+                </div>
+              </div>
+
+              {plan.items?.length ? (
+                <div className="coverage-table">
+                  <div className="coverage-head">
+                    <span>Period</span>
+                    <span>Class</span>
+                    <span>Subject</span>
+                    <span>Absent</span>
+                    <span>Substitute</span>
+                    <span>Status</span>
+                  </div>
+                  {plan.items.map((item, index) => {
+                    const candidateOptions = [
+                      ...new Set(
+                        [
+                          item.substitute,
+                          ...(item.candidates || []).map(
+                            (candidate) => candidate.teacher,
+                          ),
+                        ].filter(Boolean),
+                      ),
+                    ];
+                    return (
+                      <div
+                        className="coverage-row"
+                        key={`${item.day}-${item.period}-${item.className}-${item.subject}-${item.absentTeacher}`}
+                      >
+                        <strong>P{item.period}</strong>
+                        <span>{item.className}</span>
+                        <span
+                          style={{
+                            color: subjectColors[item.subject] || "#3157d5",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {item.subject}
+                        </span>
+                        <span>{item.absentTeacher}</span>
+                        <label className="substitute-field">
+                          <select
+                            value={item.substitute || ""}
+                            onChange={(event) =>
+                              updateSubstitute(index, event.target.value)
+                            }
+                          >
+                            <option value="">
+                              {candidateOptions.length
+                                ? "Choose substitute"
+                                : "No free substitute"}
+                            </option>
+                            {candidateOptions.map((teacher) => (
+                              <option key={teacher}>{teacher}</option>
+                            ))}
+                          </select>
+                          <small>{item.reason}</small>
+                        </label>
+                        <span
+                          className={`coverage-status ${item.status === "covered" ? "covered" : "attention"}`}
+                        >
+                          {item.status === "covered" ? "Covered" : "Needs attention"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="empty-state">
+                  No affected periods found for the selected absence date.
+                  Nothing in the base timetable needs a substitute on this day.
+                </div>
+              )}
+            </Card>
+          ) : (
+            <Card
+              icon={Users}
+              title="Substitute preview will appear here"
+              description="After you mark absences, Schedulo will list the exact affected class periods and best free teachers."
+              accent="green"
+            >
+              <div className="empty-state">
+                The planner checks the saved timetable for the selected date’s
+                weekday, finds the absent teacher’s classes, and suggests free
+                teachers without touching the base timetable.
+              </div>
+            </Card>
+          )}
+        </>
       )}
-    </Card>
+    </div>
   );
 }
 
