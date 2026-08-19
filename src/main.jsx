@@ -559,11 +559,13 @@ export function App({ organization, session }) {
                     school={school}
                     schoolId={schoolId}
                     classes={classes}
+                    sections={sections}
                     totalSections={totalSections}
                     days={days}
                     periods={periods}
                     classPeriods={classPeriods}
                     subjects={subjects}
+                    frequencies={frequencies}
                     teachers={teachers}
                     assignments={assignments}
                     blockers={blockers}
@@ -1872,11 +1874,13 @@ function ReviewStep({
   school,
   schoolId,
   classes,
+  sections,
   totalSections,
   days,
   periods,
   classPeriods,
   subjects,
+  frequencies = {},
   teachers,
   assignments,
   blockers,
@@ -1893,22 +1897,64 @@ function ReviewStep({
   );
   const classLoads = assignments.reduce((loads, item) => ({ ...loads, [item.className]: (loads[item.className] || 0) + Number(item.periods || 0) }), {});
   const teacherLoads = assignments.reduce((loads, item) => ({ ...loads, [item.teacher]: (loads[item.teacher] || 0) + Number(item.periods || 0) }), {});
-  const issues = [];
-  if (!classes.length) issues.push({ title: "No classes added", detail: "Add at least one class and section before generating.", step: 1 });
-  if (!maxDailyPeriods) issues.push({ title: "Periods per day is missing", detail: "Set the number of teaching periods in the Periods step.", step: 2 });
-  if (!subjects.length) issues.push({ title: "No subjects added", detail: "Add the subjects your classes will study.", step: 3 });
-  if (!teachers.length) issues.push({ title: "No teachers added", detail: "Add the teachers who will appear in the timetable.", step: 4 });
-  if (!assignments.length) issues.push({ title: "No teaching assignments", detail: "Add at least one subject, class, and teacher assignment.", step: 4 });
+  const classSectionNames = classes.flatMap((name) =>
+    (sections?.[name]?.length ? sections[name] : ["A"]).map(
+      (section) => `${name} ${section}`,
+    ),
+  );
+  const validClassSections = new Set(classSectionNames);
+  const validTeachers = new Set(teachers.map((teacher) => teacher.name));
+  const validSubjects = new Set(subjects);
+  const criticalIssues = [];
+  const qualityIssues = [];
+  const addCritical = (issue) => criticalIssues.push(issue);
+  const addQuality = (issue) => qualityIssues.push(issue);
+  if (!classes.length) addCritical({ title: "No classes added", detail: "Add at least one class and section before generating.", step: 1 });
+  if (!maxDailyPeriods) addCritical({ title: "Periods per day is missing", detail: "Set the number of teaching periods in the Periods step.", step: 2 });
+  if (!subjects.length) addCritical({ title: "No subjects added", detail: "Add the subjects your classes will study.", step: 3 });
+  if (!teachers.length) addCritical({ title: "No teachers added", detail: "Add the teachers who will appear in the timetable.", step: 4 });
+  if (!assignments.length) addCritical({ title: "No teaching assignments", detail: "Add at least one subject, class, and teacher assignment.", step: 4 });
   Object.entries(classLoads).forEach(([name, load]) => {
     const capacity = days * classDailyPeriods(classPeriods, periods, name, classes);
-    if (capacity && load > capacity) issues.push({ title: `${name} has too many periods`, detail: `${load} assigned periods but only ${capacity} slots are available this week.`, step: 4 });
+    if (capacity && load > capacity) addCritical({ title: `${name} has too many periods`, detail: `${load} assigned periods but only ${capacity} slots are available this week.`, step: 4 });
   });
   Object.entries(teacherLoads).forEach(([name, load]) => {
     const capacity = days * maxDailyPeriods;
-    if (capacity && load > capacity) issues.push({ title: `${name} is over capacity`, detail: `${load} assigned periods but only ${capacity} teaching slots are available.`, step: 4 });
+    if (capacity && load > capacity) addCritical({ title: `${name} is over capacity`, detail: `${load} assigned periods but only ${capacity} teaching slots are available.`, step: 4 });
+    else if (capacity && load >= Math.ceil(capacity * 0.9)) addQuality({ title: `${name} has almost no free slots`, detail: `${load} of ${capacity} teaching slots are already assigned, so the generated timetable may have no breathing room.`, step: 4 });
   });
-  assignments.forEach((item) => { if (Number(item.periods || 0) > days * 2) issues.push({ title: `${item.subject} frequency is too high`, detail: `${item.periods} periods/week exceeds the maximum of ${days * 2} supported for one assignment.`, step: 3 }); });
-  const hasIssues = issues.length > 0;
+  assignments.forEach((item) => {
+    if (Number(item.periods || 0) > days * 2) addCritical({ title: `${item.subject} frequency is too high`, detail: `${item.periods} periods/week exceeds the maximum of ${days * 2} supported for one assignment.`, step: 3 });
+    if (item.className && !validClassSections.has(item.className)) addQuality({ title: `${item.className} is not an active section`, detail: "This assignment points to a class/section that is no longer in your class list.", step: 4 });
+    if (item.teacher && !validTeachers.has(item.teacher)) addQuality({ title: `${item.teacher} is not in the teacher list`, detail: "This assignment may appear in the output with a teacher that has been removed.", step: 4 });
+    if (item.subject && !validSubjects.has(item.subject)) addQuality({ title: `${item.subject} is not in the subject library`, detail: "This assignment may generate, but the subject is no longer managed in your subject list.", step: 3 });
+  });
+  teachers.forEach((teacher) => {
+    if (!teacherLoads[teacher.name]) addQuality({ title: `${teacher.name} has no assignments`, detail: "The timetable can still generate, but this teacher will not appear in it.", step: 4 });
+  });
+  classSectionNames.forEach((name) => {
+    const load = classLoads[name] || 0;
+    const capacity = days * classDailyPeriods(classPeriods, periods, name, classes);
+    if (!load) addQuality({ title: `${name} has no assigned periods`, detail: "The timetable can generate for other sections, but this section will be empty.", step: 4 });
+    else if (capacity && load < capacity) addQuality({ title: `${name} is under-filled`, detail: `${load} of ${capacity} weekly slots are assigned, so the timetable will have blank periods.`, step: 3 });
+  });
+  classes.forEach((className) => {
+    const planned = frequencies[className] || {};
+    (sections?.[className]?.length ? sections[className] : ["A"]).forEach((section) => {
+      const sectionName = `${className} ${section}`;
+      subjects.forEach((subject) => {
+        const target = Number(planned[subject] || 0);
+        const actual = assignments
+          .filter((item) => item.className === sectionName && item.subject === subject)
+          .reduce((sum, item) => sum + Number(item.periods || 0), 0);
+        if (target > actual) addQuality({ title: `${sectionName} is short on ${subject}`, detail: `Subject plan needs ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
+        if (actual > target) addQuality({ title: `${sectionName} has extra ${subject}`, detail: `Subject plan asks for ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
+      });
+    });
+  });
+  const hasCriticalIssues = criticalIssues.length > 0;
+  const hasQualityIssues = qualityIssues.length > 0;
+  const hasIssues = hasCriticalIssues || hasQualityIssues;
   const cards = [
     {
       label: "School",
@@ -1952,26 +1998,32 @@ function ReviewStep({
     },
     {
       label: "Coverage",
-      value: hasIssues ? `${issues.length} issues` : "Ready to generate",
-      sub: hasIssues ? "See fixes below" : "All essentials covered",
+      value: hasCriticalIssues ? `${criticalIssues.length} blockers` : hasQualityIssues ? `${qualityIssues.length} warnings` : "Ready to generate",
+      sub: hasCriticalIssues ? "Must fix before generation" : hasQualityIssues ? "Can generate, but review first" : "All essentials covered",
       icon: hasIssues ? AlertTriangle : CheckCircle2,
       step: 5,
-      accent: blockers ? "red" : "green",
+      accent: hasCriticalIssues ? "red" : hasQualityIssues ? "yellow" : "green",
     },
   ];
   return (
     <div className="stack">
-      <div className={`review-banner ${hasIssues ? "warning" : "ready"}`}>
+      <div className={`review-banner ${hasCriticalIssues ? "critical" : hasQualityIssues ? "warning" : "ready"}`}>
         <div className="review-banner-icon">
           {hasIssues ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}
         </div>
         <div>
           <h2>
-            {hasIssues ? `${issues.length} things need attention` : "Your setup is ready"}
+            {hasCriticalIssues
+              ? `${criticalIssues.length} critical blocker${criticalIssues.length === 1 ? "" : "s"} found`
+              : hasQualityIssues
+                ? `${qualityIssues.length} quality warning${qualityIssues.length === 1 ? "" : "s"} found`
+                : "Your setup is ready"}
           </h2>
           <p>
-            {hasIssues
-              ? "Fix the specific items below before generating your timetable."
+            {hasCriticalIssues
+              ? "Fix these first — the timetable cannot be generated reliably with this setup."
+              : hasQualityIssues
+                ? "You can generate, but these issues may create empty classes, missing subjects, or overloaded teachers."
               : "All essentials are covered. You can generate a first timetable now."}
           </p>
         </div>
@@ -1999,18 +2051,45 @@ function ReviewStep({
       <Card
         icon={AlertTriangle}
         title="Pre-flight checks"
-        description="These checks explain why the solver may fail before generation starts."
-        accent="red"
+        description="Critical blockers stop generation. Quality warnings can still generate but may produce a weak timetable."
+        accent={hasCriticalIssues ? "red" : hasQualityIssues ? "yellow" : "green"}
       >
         {hasIssues ? (
-          <div className="blocker-list">
-            {issues.map((issue, index) => (
-              <div className="blocker-item" key={`${issue.title}-${index}`}>
-                <AlertTriangle size={17} />
-                <div><strong>{issue.title}</strong><small>{issue.detail}</small></div>
-                <button className="ghost-button small" onClick={() => setStep(issue.step)}>Fix</button>
+          <div className="issue-groups">
+            {hasCriticalIssues && (
+              <div className="issue-section critical">
+                <div className="issue-heading">
+                  <span>Critical blockers</span>
+                  <b>{criticalIssues.length}</b>
+                </div>
+                <div className="blocker-list">
+                  {criticalIssues.map((issue, index) => (
+                    <div className="blocker-item" key={`${issue.title}-${index}`}>
+                      <AlertTriangle size={17} />
+                      <div><strong>{issue.title}</strong><small>{issue.detail}</small></div>
+                      <button className="ghost-button small" onClick={() => setStep(issue.step)}>Fix</button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            )}
+            {hasQualityIssues && (
+              <div className="issue-section warning">
+                <div className="issue-heading">
+                  <span>Quality warnings</span>
+                  <b>{qualityIssues.length}</b>
+                </div>
+                <div className="blocker-list">
+                  {qualityIssues.map((issue, index) => (
+                    <div className="blocker-item" key={`${issue.title}-${index}`}>
+                      <AlertTriangle size={17} />
+                      <div><strong>{issue.title}</strong><small>{issue.detail}</small></div>
+                      <button className="ghost-button small" onClick={() => setStep(issue.step)}>Review</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="all-clear"><CheckCircle2 size={17} /><strong>Everything required is ready.</strong><span>Schedulo can generate a timetable without any known setup blockers.</span></div>
@@ -2018,9 +2097,9 @@ function ReviewStep({
         <button
           className="primary-button generate-button"
           onClick={onGenerate}
-          disabled={generating}
+          disabled={generating || hasCriticalIssues}
         >
-          <Sparkles size={17} /> {generating ? "Generating..." : "Generate timetable"}
+          <Sparkles size={17} /> {generating ? "Generating..." : hasCriticalIssues ? "Fix critical blockers first" : "Generate timetable"}
         </button>
         {generated && (
           <div
