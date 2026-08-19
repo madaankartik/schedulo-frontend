@@ -77,6 +77,13 @@ const sortClasses = (items) =>
       sensitivity: "base",
     });
   });
+const baseClassFor = (className, classes) =>
+  [...classes]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => className === name || className?.startsWith(`${name} `)) ||
+  className;
+const classDailyPeriods = (classPeriods, periods, className, classes) =>
+  Number(classPeriods?.[baseClassFor(className, classes)] || periods || 0);
 const subjectColors = {
   English: "#e4ad36",
   Hindi: "#d77751",
@@ -101,6 +108,7 @@ export function App({ organization, session }) {
   const [sections, setSections] = useState({});
   const [days, setDays] = useState(5);
   const [periods, setPeriods] = useState(0);
+  const [classPeriods, setClassPeriods] = useState({});
   const [subjects, setSubjects] = useState([]);
   const [frequencies, setFrequencies] = useState({});
   const [teachers, setTeachers] = useState([]);
@@ -122,7 +130,10 @@ export function App({ organization, session }) {
     (sum, row) => sum + Object.values(row).reduce((a, b) => a + b, 0),
     0,
   );
-  const weeklyCapacity = days * periods;
+  const maxDailyPeriods = Math.max(
+    Number(periods || 0),
+    ...classes.map((name) => Number(classPeriods[name] || 0)),
+  );
   const classLoads = assignments.reduce(
     (loads, item) => ({
       ...loads,
@@ -139,11 +150,14 @@ export function App({ organization, session }) {
     {},
   );
   const preflight = {
-    classCapacity: Object.values(classLoads).some(
-      (load) => load > weeklyCapacity,
+    classCapacity: Object.entries(classLoads).some(
+      ([name, load]) =>
+        load >
+        days *
+          classDailyPeriods(classPeriods, periods, name, classes),
     ),
     teacherCapacity: Object.values(teacherLoads).some(
-      (load) => load > weeklyCapacity,
+      (load) => load > days * maxDailyPeriods,
     ),
     // The solver can place a subject twice on a day when its weekly frequency
     // is greater than the number of working days (for example, 6 periods over
@@ -169,6 +183,7 @@ export function App({ organization, session }) {
   const buildSetup = () => ({
     days,
     periods,
+    classPeriods,
     classes,
     sections,
     subjects,
@@ -230,6 +245,7 @@ export function App({ organization, session }) {
     }
     if (saved.days) setDays(saved.days);
     if (saved.periods) setPeriods(saved.periods);
+    setClassPeriods(saved.classPeriods || {});
     if (saved.subjects) setSubjects(saved.subjects);
     if (saved.frequencies) setFrequencies(saved.frequencies);
     if (saved.teachers) setTeachers(saved.teachers);
@@ -275,6 +291,20 @@ export function App({ organization, session }) {
       .finally(() => setHydrated(true));
   }, [schoolId]);
   useEffect(() => {
+    setClassPeriods((current) => {
+      const next = Object.fromEntries(
+        classes.map((name) => [
+          name,
+          Math.max(1, Number(current[name] || periods || 1)),
+        ]),
+      );
+      const same =
+        Object.keys(current).length === Object.keys(next).length &&
+        Object.entries(next).every(([name, value]) => current[name] === value);
+      return same ? current : next;
+    });
+  }, [classes, periods]);
+  useEffect(() => {
     if (!hydrated || !schoolId) return undefined;
     const timer = window.setTimeout(() => saveSetup(), 500);
     return () => window.clearTimeout(timer);
@@ -286,6 +316,7 @@ export function App({ organization, session }) {
     sections,
     days,
     periods,
+    classPeriods,
     subjects,
     frequencies,
     teachers,
@@ -474,6 +505,8 @@ export function App({ organization, session }) {
                     setDays={setDays}
                     periods={periods}
                     setPeriods={setPeriods}
+                    classPeriods={classPeriods}
+                    setClassPeriods={setClassPeriods}
                     classes={classes}
                   />
                 )}
@@ -485,7 +518,9 @@ export function App({ organization, session }) {
                     frequencies={frequencies}
                     updateFrequency={updateFrequency}
                     totalFrequency={totalFrequency}
-                    weeklyCapacity={days * periods}
+                    days={days}
+                    periods={periods}
+                    classPeriods={classPeriods}
                   />
                 )}
                 {step === 4 && (
@@ -510,6 +545,7 @@ export function App({ organization, session }) {
                     totalSections={totalSections}
                     days={days}
                     periods={periods}
+                    classPeriods={classPeriods}
                     subjects={subjects}
                     teachers={teachers}
                     assignments={assignments}
@@ -1006,7 +1042,29 @@ function ClassesStep({
   );
 }
 
-function PeriodsStep({ days, setDays, periods, setPeriods, classes }) {
+function PeriodsStep({
+  days,
+  setDays,
+  periods,
+  setPeriods,
+  classPeriods,
+  setClassPeriods,
+  classes,
+}) {
+  const bulkPeriods = Math.max(1, Number(periods || 1));
+  const periodForClass = (name) =>
+    Math.max(1, Number(classPeriods[name] || bulkPeriods));
+  const updateClassPeriods = (name, delta) => {
+    setClassPeriods({
+      ...classPeriods,
+      [name]: Math.max(1, periodForClass(name) + delta),
+    });
+  };
+  const applyPeriodsToAll = () => {
+    setClassPeriods(
+      Object.fromEntries(classes.map((name) => [name, bulkPeriods])),
+    );
+  };
   return (
     <div className="stack">
       <Card
@@ -1049,22 +1107,24 @@ function PeriodsStep({ days, setDays, periods, setPeriods, classes }) {
             <strong>Regular periods</strong>
           </span>
           <div className="stepper-control">
-            <button onClick={() => setPeriods(Math.max(1, periods - 1))}>
+            <button onClick={() => setPeriods(Math.max(1, bulkPeriods - 1))}>
               −
             </button>
-            <b>{periods}</b>
-            <button onClick={() => setPeriods(periods + 1)}>+</button>
+            <b>{bulkPeriods}</b>
+            <button onClick={() => setPeriods(bulkPeriods + 1)}>+</button>
           </div>
-          <button className="secondary-button">Apply to all</button>
+          <button className="secondary-button" onClick={applyPeriodsToAll}>
+            Apply to all
+          </button>
         </div>
         <div className="class-period-list">
           {classes.map((name) => (
             <div key={name}>
               <span>{name}</span>
               <div className="stepper-control compact">
-                <button>−</button>
-                <b>{periods}</b>
-                <button>+</button>
+                <button onClick={() => updateClassPeriods(name, -1)}>−</button>
+                <b>{periodForClass(name)}</b>
+                <button onClick={() => updateClassPeriods(name, 1)}>+</button>
               </div>
             </div>
           ))}
@@ -1081,7 +1141,9 @@ function SubjectsStep({
   frequencies,
   updateFrequency,
   totalFrequency,
-  weeklyCapacity,
+  days,
+  periods,
+  classPeriods,
 }) {
   const [newSubject, setNewSubject] = useState("");
   const [selectedClass, setSelectedClass] = useState(classes[0]);
@@ -1094,7 +1156,9 @@ function SubjectsStep({
   const addCommonSubject = (subject) => {
     if (!subjects.includes(subject)) setSubjects([...subjects, subject]);
   };
-  const capacity = weeklyCapacity || 0;
+  const capacity = selectedClass
+    ? days * classDailyPeriods(classPeriods, periods, selectedClass, classes)
+    : 0;
   const totalForClass = Object.values(frequencies[selectedClass] || {}).reduce(
     (a, b) => a + b,
     0,
@@ -1651,6 +1715,7 @@ function ReviewStep({
   totalSections,
   days,
   periods,
+  classPeriods,
   subjects,
   teachers,
   assignments,
@@ -1662,17 +1727,26 @@ function ReviewStep({
   onGenerate,
   generating,
 }) {
-  const weeklyCapacity = days * periods;
+  const maxDailyPeriods = Math.max(
+    Number(periods || 0),
+    ...classes.map((name) => Number(classPeriods[name] || 0)),
+  );
   const classLoads = assignments.reduce((loads, item) => ({ ...loads, [item.className]: (loads[item.className] || 0) + Number(item.periods || 0) }), {});
   const teacherLoads = assignments.reduce((loads, item) => ({ ...loads, [item.teacher]: (loads[item.teacher] || 0) + Number(item.periods || 0) }), {});
   const issues = [];
   if (!classes.length) issues.push({ title: "No classes added", detail: "Add at least one class and section before generating.", step: 1 });
-  if (!periods) issues.push({ title: "Periods per day is missing", detail: "Set the number of teaching periods in the Periods step.", step: 2 });
+  if (!maxDailyPeriods) issues.push({ title: "Periods per day is missing", detail: "Set the number of teaching periods in the Periods step.", step: 2 });
   if (!subjects.length) issues.push({ title: "No subjects added", detail: "Add the subjects your classes will study.", step: 3 });
   if (!teachers.length) issues.push({ title: "No teachers added", detail: "Add the teachers who will appear in the timetable.", step: 4 });
   if (!assignments.length) issues.push({ title: "No teaching assignments", detail: "Add at least one subject, class, and teacher assignment.", step: 4 });
-  Object.entries(classLoads).forEach(([name, load]) => { if (weeklyCapacity && load > weeklyCapacity) issues.push({ title: `${name} has too many periods`, detail: `${load} assigned periods but only ${weeklyCapacity} slots are available this week.`, step: 4 }); });
-  Object.entries(teacherLoads).forEach(([name, load]) => { if (weeklyCapacity && load > weeklyCapacity) issues.push({ title: `${name} is over capacity`, detail: `${load} assigned periods but only ${weeklyCapacity} teaching slots are available.`, step: 4 }); });
+  Object.entries(classLoads).forEach(([name, load]) => {
+    const capacity = days * classDailyPeriods(classPeriods, periods, name, classes);
+    if (capacity && load > capacity) issues.push({ title: `${name} has too many periods`, detail: `${load} assigned periods but only ${capacity} slots are available this week.`, step: 4 });
+  });
+  Object.entries(teacherLoads).forEach(([name, load]) => {
+    const capacity = days * maxDailyPeriods;
+    if (capacity && load > capacity) issues.push({ title: `${name} is over capacity`, detail: `${load} assigned periods but only ${capacity} teaching slots are available.`, step: 4 });
+  });
   assignments.forEach((item) => { if (Number(item.periods || 0) > days * 2) issues.push({ title: `${item.subject} frequency is too high`, detail: `${item.periods} periods/week exceeds the maximum of ${days * 2} supported for one assignment.`, step: 3 }); });
   const hasIssues = issues.length > 0;
   const cards = [
@@ -1694,7 +1768,7 @@ function ReviewStep({
     },
     {
       label: "Periods",
-      value: `${periods} regular`,
+      value: classes.length && classes.some((name) => classDailyPeriods(classPeriods, periods, name, classes) !== classDailyPeriods(classPeriods, periods, classes[0], classes)) ? "Mixed periods" : `${maxDailyPeriods} regular`,
       sub: `${days}-day week`,
       icon: Clock3,
       step: 2,
