@@ -1346,11 +1346,17 @@ function TeachersStep({
   const [draft, setDraft] = useState({ name: "", email: "" });
   const [editing, setEditing] = useState(null);
   const [expandedTeacher, setExpandedTeacher] = useState(null);
-  const [assignmentDraft, setAssignmentDraft] = useState({
+  const defaultAssignmentDraft = () => ({
     subject: subjects[0] || "",
     className: firstClassOption,
     periods: 3,
   });
+  const [assignmentDraft, setAssignmentDraft] = useState(defaultAssignmentDraft);
+  const [editingAssignmentIndex, setEditingAssignmentIndex] = useState(null);
+  const resetAssignmentDraft = () => {
+    setAssignmentDraft(defaultAssignmentDraft());
+    setEditingAssignmentIndex(null);
+  };
   const closeTeacherEditor = () => {
     setEditing(null);
     setShowAddTeacher(false);
@@ -1420,21 +1426,31 @@ function TeachersStep({
   const addTeacherAssignment = (teacher) => {
     if (!assignmentDraft.subject || !assignmentDraft.className) return;
     const duplicate = assignments.some(
-      (item) =>
+      (item, index) =>
+        index !== editingAssignmentIndex &&
         item.teacher === teacher.name &&
         item.subject === assignmentDraft.subject &&
         item.className === assignmentDraft.className,
     );
     if (duplicate) return notify("This assignment already exists");
-    setAssignments([
-      ...assignments,
-      {
-        teacher: teacher.name,
-        subject: assignmentDraft.subject,
-        className: assignmentDraft.className,
-        periods: Number(assignmentDraft.periods),
-      },
-    ]);
+    const nextAssignment = {
+      teacher: teacher.name,
+      subject: assignmentDraft.subject,
+      className: assignmentDraft.className,
+      periods: Math.max(1, Number(assignmentDraft.periods) || 1),
+    };
+    if (editingAssignmentIndex !== null) {
+      setAssignments(
+        assignments.map((item, index) =>
+          index === editingAssignmentIndex ? nextAssignment : item,
+        ),
+      );
+      resetAssignmentDraft();
+      notify("Teaching assignment updated");
+      return;
+    }
+    setAssignments([...assignments, nextAssignment]);
+    resetAssignmentDraft();
     notify("Teaching assignment added");
   };
   return (
@@ -1548,11 +1564,7 @@ function TeachersStep({
                 className="teacher-info teacher-expand-trigger"
                 onClick={() => {
                   setExpandedTeacher(expandedTeacher === teacher.name ? null : teacher.name);
-                  setAssignmentDraft({
-                    subject: subjects[0] || "",
-                    className: firstClassOption,
-                    periods: 3,
-                  });
+                  resetAssignmentDraft();
                 }}
               >
                 <strong>{teacher.name}</strong>
@@ -1566,14 +1578,11 @@ function TeachersStep({
                 onClick={() => {
                   if (expandedTeacher === teacher.name) {
                     setExpandedTeacher(null);
+                    resetAssignmentDraft();
                     return;
                   }
                   setExpandedTeacher(teacher.name);
-                  setAssignmentDraft({
-                    subject: subjects[0] || "",
-                    className: firstClassOption,
-                    periods: 3,
-                  });
+                  resetAssignmentDraft();
                 }}
               >
                 {expandedTeacher === teacher.name ? (
@@ -1609,7 +1618,10 @@ function TeachersStep({
                   </div>
                   <button
                     className="ghost-button small"
-                    onClick={() => setExpandedTeacher(null)}
+                    onClick={() => {
+                      setExpandedTeacher(null);
+                      resetAssignmentDraft();
+                    }}
                   >
                     Done
                   </button>
@@ -1637,14 +1649,63 @@ function TeachersStep({
                     onChange={(e) => setAssignmentDraft({ ...assignmentDraft, periods: e.target.value })}
                     aria-label="Periods per week"
                   />
-                  <button className="primary-button small" onClick={() => addTeacherAssignment(teacher)}>
-                    <Plus size={14} /> Add
+                  <button
+                    className="primary-button small"
+                    onClick={() => addTeacherAssignment(teacher)}
+                  >
+                    {editingAssignmentIndex !== null ? (
+                      <Check size={14} />
+                    ) : (
+                      <Plus size={14} />
+                    )}
+                    {editingAssignmentIndex !== null ? "Update" : "Add"}
                   </button>
+                  {editingAssignmentIndex !== null && (
+                    <button
+                      className="ghost-button small"
+                      onClick={resetAssignmentDraft}
+                    >
+                      Cancel edit
+                    </button>
+                  )}
                 </div>
-                {assignments.filter((item) => item.teacher === teacher.name).map((item, index) => (
-                  <div className="teacher-assignment-row" key={`${item.subject}-${item.className}-${index}`}>
+                {assignments
+                  .map((item, assignmentIndex) => ({ item, assignmentIndex }))
+                  .filter(({ item }) => item.teacher === teacher.name)
+                  .map(({ item, assignmentIndex }) => (
+                  <div
+                    className={`teacher-assignment-row ${editingAssignmentIndex === assignmentIndex ? "editing" : ""}`}
+                    key={`${item.subject}-${item.className}-${assignmentIndex}`}
+                  >
                     <span>{item.subject}</span><small>{item.className} · {item.periods}/wk</small>
-                    <button className="icon-button" onClick={() => setAssignments(assignments.filter((candidate) => candidate !== item))}><Trash2 size={14} /></button>
+                    <button
+                      className="icon-button"
+                      title="Edit assignment"
+                      onClick={() => {
+                        setEditingAssignmentIndex(assignmentIndex);
+                        setAssignmentDraft({
+                          subject: item.subject,
+                          className: item.className,
+                          periods: item.periods,
+                        });
+                      }}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      title="Delete assignment"
+                      onClick={() => {
+                        setAssignments(
+                          assignments.filter(
+                            (_, index) => index !== assignmentIndex,
+                          ),
+                        );
+                        resetAssignmentDraft();
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 ))}
               </div>

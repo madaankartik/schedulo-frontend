@@ -172,9 +172,10 @@ nav { padding-top:16px; }
 .teacher-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
 .teacher-panel-head .mini-label { margin:0 0 3px; }
 .teacher-panel-head small { color:var(--muted); font-size:10px; }
-.teacher-assignment-form { display:grid; grid-template-columns:1fr 1fr 90px auto; gap:8px; align-items:center; }
+.teacher-assignment-form { display:grid; grid-template-columns:1fr 1fr 90px auto auto; gap:8px; align-items:center; }
 .teacher-assignment-form select, .teacher-assignment-form input { min-height:34px; }
 .teacher-assignment-row { display:flex; align-items:center; gap:10px; margin-top:8px; padding:8px 10px; border:1px solid #dfe3e7; border-radius:7px; background:#fff; font-size:11px; }
+.teacher-assignment-row.editing { border-color:#9eafe8; box-shadow:0 0 0 3px #eaf0ff; }
 .teacher-assignment-row span { font-weight:700; flex:1; }.teacher-assignment-row small { color:var(--muted); }
 .blocker-list { border:1px solid #edc1c4; border-radius:12px; overflow:hidden; }
 .blocker-item { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid #f1d9da; background:#fffafa; }
