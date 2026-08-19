@@ -153,6 +153,14 @@ nav { padding-top:16px; }
 .frequency-actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 .frequency-actions .secondary-button { color:var(--blue); border-color:#c9d3f5; background:#fff; }
 .frequency-actions .secondary-button:hover { background:var(--blue-soft); }
+.teacher-modal-backdrop { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:28px; background:rgba(31, 41, 55, .22); backdrop-filter:blur(5px); }
+.teacher-modal { width:min(100%, 620px); padding:22px; border:1px solid var(--line); border-radius:18px; background:var(--surface); box-shadow:0 24px 70px #1f293729; animation:rise .2s ease both; }
+.teacher-modal-head { display:flex; justify-content:space-between; gap:18px; align-items:flex-start; margin-bottom:18px; }
+.teacher-modal-head h3 { margin:0; font:600 24px 'Bricolage Grotesque', sans-serif; letter-spacing:-.04em; color:var(--ink); }
+.teacher-modal-head p { margin-top:6px; color:var(--muted); font-size:12px; line-height:1.55; }
+.teacher-modal-form { display:grid; gap:12px; }
+.teacher-modal-form input { width:100%; }
+.teacher-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
 .wizard-footer { border-top:0; }
 .list-row > .muted-action { border:0; background:transparent; padding:4px; display:grid; place-items:center; color:#a3acb4; border-radius:6px; }
 .list-row > .muted-action:hover { background:#f3f1ec; color:var(--coral); }

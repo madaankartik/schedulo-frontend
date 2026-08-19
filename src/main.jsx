@@ -1351,6 +1351,11 @@ function TeachersStep({
     className: firstClassOption,
     periods: 3,
   });
+  const closeTeacherEditor = () => {
+    setEditing(null);
+    setShowAddTeacher(false);
+    setDraft({ name: "", email: "" });
+  };
   const addTeacher = () => {
     if (!draft.name.trim()) return;
     setTeachers([
@@ -1366,8 +1371,7 @@ function TeachersStep({
         assignments: 0,
       },
     ]);
-    setDraft({ name: "", email: "" });
-    setShowAddTeacher(false);
+    closeTeacherEditor();
     notify("Teacher added");
   };
   const startEdit = (teacher) => {
@@ -1399,8 +1403,7 @@ function TeachersStep({
         item.teacher === editing ? { ...item, teacher: nextName } : item,
       ),
     );
-    setEditing(null);
-    setDraft({ name: "", email: "" });
+    closeTeacherEditor();
     notify("Teacher updated");
   };
   const deleteTeacher = (teacher) => {
@@ -1469,36 +1472,62 @@ function TeachersStep({
           </button>
         </div>
         {(showAddTeacher || editing) && (
-          <div className="add-row">
-            <input
-              placeholder="Teacher name"
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            />
-            <input
-              placeholder="Email (optional)"
-              value={draft.email}
-              onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-            />
-            {editing ? (
-              <button className="primary-button small" onClick={saveEdit}>
-                Save changes
-              </button>
-            ) : (
-              <button className="primary-button small" onClick={addTeacher}>
-                Save
-              </button>
-            )}
-            <button
-              className="ghost-button small"
-              onClick={() => {
-                setEditing(null);
-                setShowAddTeacher(false);
-                setDraft({ name: "", email: "" });
-              }}
+          <div className="teacher-modal-backdrop" onClick={closeTeacherEditor}>
+            <div
+              className="teacher-modal"
+              onClick={(event) => event.stopPropagation()}
             >
-              Cancel
-            </button>
+              <div className="teacher-modal-head">
+                <div>
+                  <h3>{editing ? "Edit teacher" : "Add teacher"}</h3>
+                  <p>
+                    {editing
+                      ? "Update this teacher’s details without moving the page around."
+                      : "Add the teacher now, then attach subjects and classes from their row."}
+                  </p>
+                </div>
+                <button className="icon-button" onClick={closeTeacherEditor}>
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="teacher-modal-form">
+                <input
+                  autoFocus
+                  placeholder="Teacher name"
+                  value={draft.name}
+                  onChange={(e) =>
+                    setDraft({ ...draft, name: e.target.value })
+                  }
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && (editing ? saveEdit() : addTeacher())
+                  }
+                />
+                <input
+                  placeholder="Email (optional)"
+                  value={draft.email}
+                  onChange={(e) =>
+                    setDraft({ ...draft, email: e.target.value })
+                  }
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && (editing ? saveEdit() : addTeacher())
+                  }
+                />
+                <div className="teacher-modal-actions">
+                  <button className="ghost-button small" onClick={closeTeacherEditor}>
+                    Cancel
+                  </button>
+                  {editing ? (
+                    <button className="primary-button small" onClick={saveEdit}>
+                      Save changes
+                    </button>
+                  ) : (
+                    <button className="primary-button small" onClick={addTeacher}>
+                      Save
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
         <div className="search-row">
