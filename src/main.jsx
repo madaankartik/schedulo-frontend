@@ -1734,14 +1734,7 @@ function ReviewStep({
         )}
       </Card>
       {generated?.entries?.length > 0 && (
-        <>
-          <SchedulePreview entries={generated.entries} />
-          <AbsencePanel
-            schoolId={schoolId}
-            teachers={teachers}
-            notify={notify}
-          />
-        </>
+        <SchedulePreview entries={generated.entries} />
       )}
     </div>
   );
