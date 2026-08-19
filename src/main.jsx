@@ -110,6 +110,7 @@ export function App({ organization, session }) {
   const [schoolId, setSchoolId] = useState(organization?.school_id || null);
   const [hydrated, setHydrated] = useState(false);
   const [generated, setGenerated] = useState(null);
+  const [page, setPage] = useState("setup");
 
   const totalSections = Object.values(sections).reduce(
     (sum, list) => sum + (Array.isArray(list) ? list.length : 0),
@@ -172,6 +173,7 @@ export function App({ organization, session }) {
     frequencies,
     teachers,
     assignments,
+    generated,
   });
   const authHeaders = () => ({
     "Content-Type": "application/json",
@@ -220,6 +222,7 @@ export function App({ organization, session }) {
         if (saved.frequencies) setFrequencies(saved.frequencies);
         if (saved.teachers) setTeachers(saved.teachers);
         if (saved.assignments) setAssignments(saved.assignments);
+        if (saved.generated) setGenerated(saved.generated);
       })
       .finally(() => setHydrated(true));
   }, [schoolId]);
@@ -239,6 +242,7 @@ export function App({ organization, session }) {
     frequencies,
     teachers,
     assignments,
+    generated,
   ]);
   const generate = async () => {
     try {
@@ -348,11 +352,22 @@ export function App({ organization, session }) {
 
   return (
     <div className="app-shell">
-      <Sidebar step={step} setStep={setStep} />
+      <Sidebar step={step} setStep={setStep} page={page} setPage={setPage} />
       <main className="main-shell">
         <Topbar school={school} session={session} />
         <div className="page-wrap">
-          {step === -1 ? (
+          {page === "view" ? (
+            <TimetableView
+              generated={generated}
+              classes={classes}
+              school={school}
+              onGenerate={() => {
+                setPage("setup");
+                setStep(5);
+              }}
+            />
+          ) : null}
+          {page !== "view" && (step === -1 ? (
             <DashboardStep
               school={school}
               classes={classes}
@@ -471,7 +486,7 @@ export function App({ organization, session }) {
                 </button>
               </div>
             </>
-          )}
+          ))}
         </div>
       </main>
       {toast && (
@@ -585,7 +600,7 @@ function DashboardStep({
   );
 }
 
-function Sidebar({ step, setStep }) {
+function Sidebar({ step, setStep, page, setPage }) {
   const nav = [
     { label: "Dashboard", icon: LayoutDashboard, group: "Overview", step: -1 },
     { label: "Setup wizard", icon: WandSparkles, group: "Setup", step: 0 },
@@ -620,13 +635,20 @@ function Sidebar({ step, setStep }) {
           const showGroup = item.group !== lastGroup;
           lastGroup = item.group;
           const Icon = item.icon;
-          const active = item.step === step;
+          const active = item.label === "View timetable" ? page === "view" : page !== "view" && item.step === step;
           return (
             <React.Fragment key={item.label}>
               {showGroup && <div className="nav-group">{item.group}</div>}
               <button
                 className={`nav-item ${active ? "active" : ""}`}
-                onClick={() => item.step !== undefined && setStep(item.step)}
+                onClick={() => {
+                  if (item.label === "View timetable") {
+                    setPage("view");
+                    return;
+                  }
+                  setPage("setup");
+                  if (item.step !== undefined) setStep(item.step);
+                }}
               >
                 <Icon size={18} /> <span>{item.label}</span>
                 {item.label === "Absences & substitutes" && (
@@ -1720,6 +1742,27 @@ function ReviewStep({
             notify={notify}
           />
         </>
+      )}
+    </div>
+  );
+}
+
+function TimetableView({ generated, classes, school, onGenerate }) {
+  return (
+    <div className="stack timetable-view">
+      <div className="eyebrow"><CalendarDays size={14} /> VIEW TIMETABLE</div>
+      <div className="page-heading-row">
+        <div>
+          <h1>{school.name || "Your timetable"}</h1>
+          <p>Browse the latest saved timetable by class. Your generated schedule stays available after refresh.</p>
+        </div>
+      </div>
+      {generated?.entries?.length ? (
+        <SchedulePreview entries={generated.entries} />
+      ) : (
+        <Card icon={CalendarDays} title="No timetable yet" description="Generate a timetable from the Review step to see it here." accent="blue">
+          <button className="primary-button" onClick={onGenerate}><Sparkles size={16} /> Generate timetable</button>
+        </Card>
       )}
     </div>
   );
