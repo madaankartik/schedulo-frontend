@@ -89,6 +89,7 @@ const subjectColors = {
 
 export function App({ organization, session }) {
   const stepStorageKey = `schedulo_step_${organization?.school_id || "draft"}`;
+  const draftStorageKey = `schedulo_setup_draft_${organization?.school_id || "draft"}`;
   const [step, setStep] = useState(() =>
     Number(window.localStorage.getItem(stepStorageKey) || 0),
   );
@@ -182,20 +183,71 @@ export function App({ organization, session }) {
       ? { Authorization: `Bearer ${session.access_token}` }
       : {}),
   });
+  const readSetupDraft = () => {
+    try {
+      return JSON.parse(window.localStorage.getItem(draftStorageKey) || "null");
+    } catch {
+      return null;
+    }
+  };
+  const writeSetupDraft = () => {
+    const savedAt = Date.now();
+    const previous = readSetupDraft();
+    const draft = {
+      savedAt,
+      syncedAt: previous?.syncedAt || 0,
+      data: {
+        name: school.name,
+        academic_year: school.year,
+        setup: buildSetup(),
+      },
+    };
+    window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    return draft;
+  };
+  const markSetupDraftSynced = (savedAt) => {
+    const draft = readSetupDraft();
+    if (!draft || draft.savedAt !== savedAt) return;
+    window.localStorage.setItem(
+      draftStorageKey,
+      JSON.stringify({ ...draft, syncedAt: savedAt }),
+    );
+  };
+  const applySetupData = (data) => {
+    if (!data) return;
+    setSchool({ name: data.name || "", year: data.academic_year || "" });
+    const saved = data.setup || {};
+    if (saved.classes) setClasses(saved.classes);
+    if (saved.sections) {
+      const activeClasses = new Set(saved.classes || []);
+      setSections(
+        Object.fromEntries(
+          Object.entries(saved.sections).filter(([name]) =>
+            activeClasses.has(name),
+          ),
+        ),
+      );
+    }
+    if (saved.days) setDays(saved.days);
+    if (saved.periods) setPeriods(saved.periods);
+    if (saved.subjects) setSubjects(saved.subjects);
+    if (saved.frequencies) setFrequencies(saved.frequencies);
+    if (saved.teachers) setTeachers(saved.teachers);
+    if (saved.assignments) setAssignments(saved.assignments);
+    if (saved.generated) setGenerated(saved.generated);
+  };
   const saveSetup = async () => {
+    const draft = writeSetupDraft();
     if (!schoolId) return false;
     const response = await fetch(
       `${API_URL}/api/v1/schools/${schoolId}/setup`,
       {
         method: "PUT",
         headers: authHeaders(),
-        body: JSON.stringify({
-          name: school.name,
-          academic_year: school.year,
-          setup: buildSetup(),
-        }),
+        body: JSON.stringify(draft.data),
       },
     );
+    if (response.ok) markSetupDraftSynced(draft.savedAt);
     return response.ok;
   };
   const saveSetupInBackground = () => {
@@ -209,30 +261,16 @@ export function App({ organization, session }) {
   };
   useEffect(() => {
     if (!schoolId) return;
+    const draft = readSetupDraft();
     fetch(`${API_URL}/api/v1/schools/${schoolId}`, { headers: authHeaders() })
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
-        if (!data) return;
-        setSchool({ name: data.name, year: data.academic_year });
-        const saved = data.setup || {};
-        if (saved.classes) setClasses(saved.classes);
-        if (saved.sections) {
-          const activeClasses = new Set(saved.classes || []);
-          setSections(
-            Object.fromEntries(
-              Object.entries(saved.sections).filter(([name]) =>
-                activeClasses.has(name),
-              ),
-            ),
-          );
-        }
-        if (saved.days) setDays(saved.days);
-        if (saved.periods) setPeriods(saved.periods);
-        if (saved.subjects) setSubjects(saved.subjects);
-        if (saved.frequencies) setFrequencies(saved.frequencies);
-        if (saved.teachers) setTeachers(saved.teachers);
-        if (saved.assignments) setAssignments(saved.assignments);
-        if (saved.generated) setGenerated(saved.generated);
+        const hasUnsyncedDraft =
+          draft?.data && draft.savedAt > (draft.syncedAt || 0);
+        applySetupData(hasUnsyncedDraft ? draft.data : data || draft?.data);
+      })
+      .catch(() => {
+        applySetupData(draft?.data);
       })
       .finally(() => setHydrated(true));
   }, [schoolId]);
