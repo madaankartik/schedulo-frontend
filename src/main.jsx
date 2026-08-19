@@ -1345,6 +1345,7 @@ function TeachersStep({
   const firstClassOption = classOptions[0] || "";
   const [draft, setDraft] = useState({ name: "", email: "" });
   const [editing, setEditing] = useState(null);
+  const [teacherEditorMessage, setTeacherEditorMessage] = useState("");
   const [expandedTeacher, setExpandedTeacher] = useState(null);
   const defaultAssignmentDraft = () => ({
     subject: subjects[0] || "",
@@ -1361,9 +1362,13 @@ function TeachersStep({
     setEditing(null);
     setShowAddTeacher(false);
     setDraft({ name: "", email: "" });
+    setTeacherEditorMessage("");
   };
   const addTeacher = () => {
-    if (!draft.name.trim()) return;
+    if (!draft.name.trim()) {
+      setTeacherEditorMessage("Teacher name is required.");
+      return;
+    }
     setTeachers([
       ...teachers,
       {
@@ -1378,14 +1383,19 @@ function TeachersStep({
       },
     ]);
     closeTeacherEditor();
-    notify("Teacher added");
   };
   const startEdit = (teacher) => {
+    setShowAddTeacher(false);
+    setTeacherEditorMessage("");
     setEditing(teacher.name);
     setDraft({ name: teacher.name, email: teacher.email || "" });
   };
   const saveEdit = () => {
-    if (!draft.name.trim() || !editing) return;
+    if (!editing) return;
+    if (!draft.name.trim()) {
+      setTeacherEditorMessage("Teacher name is required.");
+      return;
+    }
     const nextName = draft.name.trim();
     setTeachers(
       teachers.map((teacher) =>
@@ -1410,7 +1420,6 @@ function TeachersStep({
       ),
     );
     closeTeacherEditor();
-    notify("Teacher updated");
   };
   const deleteTeacher = (teacher) => {
     if (
@@ -1474,12 +1483,14 @@ function TeachersStep({
         title="Teaching team"
         description="Add staff and the subjects/classes they teach."
         accent="blue"
+        className="teaching-card"
       >
         <div className="card-actions">
           <button
             className="secondary-button"
             onClick={() => {
               setEditing(null);
+              setTeacherEditorMessage("");
               setDraft({ name: "", email: "" });
               setShowAddTeacher(true);
             }}
@@ -1488,60 +1499,59 @@ function TeachersStep({
           </button>
         </div>
         {(showAddTeacher || editing) && (
-          <div className="teacher-modal-backdrop" onClick={closeTeacherEditor}>
-            <div
-              className="teacher-modal"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="teacher-modal-head">
-                <div>
-                  <h3>{editing ? "Edit teacher" : "Add teacher"}</h3>
-                  <p>
-                    {editing
-                      ? "Update this teacher’s details without moving the page around."
-                      : "Add the teacher now, then attach subjects and classes from their row."}
-                  </p>
-                </div>
-                <button className="icon-button" onClick={closeTeacherEditor}>
-                  <X size={18} />
-                </button>
+          <div className="teacher-editor-popover">
+            <div className="teacher-editor-head">
+              <div>
+                <h3>{editing ? "Edit teacher" : "Add teacher"}</h3>
+                <p>
+                  {editing
+                    ? "Update details here. The list behind stays steady."
+                    : "Add the teacher, then assign subjects from their row."}
+                </p>
               </div>
-              <div className="teacher-modal-form">
-                <input
-                  autoFocus
-                  placeholder="Teacher name"
-                  value={draft.name}
-                  onChange={(e) =>
-                    setDraft({ ...draft, name: e.target.value })
-                  }
-                  onKeyDown={(e) =>
-                    e.key === "Enter" && (editing ? saveEdit() : addTeacher())
-                  }
-                />
-                <input
-                  placeholder="Email (optional)"
-                  value={draft.email}
-                  onChange={(e) =>
-                    setDraft({ ...draft, email: e.target.value })
-                  }
-                  onKeyDown={(e) =>
-                    e.key === "Enter" && (editing ? saveEdit() : addTeacher())
-                  }
-                />
-                <div className="teacher-modal-actions">
-                  <button className="ghost-button small" onClick={closeTeacherEditor}>
-                    Cancel
-                  </button>
-                  {editing ? (
-                    <button className="primary-button small" onClick={saveEdit}>
-                      Save changes
-                    </button>
-                  ) : (
-                    <button className="primary-button small" onClick={addTeacher}>
-                      Save
-                    </button>
-                  )}
+              <button className="icon-button" onClick={closeTeacherEditor}>
+                <X size={17} />
+              </button>
+            </div>
+            <div className="teacher-editor-form">
+              <input
+                autoFocus
+                placeholder="Teacher name"
+                value={draft.name}
+                onChange={(e) => {
+                  setTeacherEditorMessage("");
+                  setDraft({ ...draft, name: e.target.value });
+                }}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && (editing ? saveEdit() : addTeacher())
+                }
+              />
+              <input
+                placeholder="Email (optional)"
+                value={draft.email}
+                onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && (editing ? saveEdit() : addTeacher())
+                }
+              />
+              {teacherEditorMessage && (
+                <div className="teacher-editor-message">
+                  {teacherEditorMessage}
                 </div>
+              )}
+              <div className="teacher-editor-actions">
+                <button className="ghost-button small" onClick={closeTeacherEditor}>
+                  Cancel
+                </button>
+                {editing ? (
+                  <button className="primary-button small" onClick={saveEdit}>
+                    Save changes
+                  </button>
+                ) : (
+                  <button className="primary-button small" onClick={addTeacher}>
+                    Save
+                  </button>
+                )}
               </div>
             </div>
           </div>
