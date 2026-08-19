@@ -1921,22 +1921,22 @@ function ReviewStep({
   Object.entries(teacherLoads).forEach(([name, load]) => {
     const capacity = days * maxDailyPeriods;
     if (capacity && load > capacity) addCritical({ title: `${name} is over capacity`, detail: `${load} assigned periods but only ${capacity} teaching slots are available.`, step: 4 });
-    else if (capacity && load >= Math.ceil(capacity * 0.9)) addQuality({ title: `${name} has almost no free slots`, detail: `${load} of ${capacity} teaching slots are already assigned, so the generated timetable may have no breathing room.`, step: 4 });
+    else if (capacity && load >= Math.ceil(capacity * 0.9)) addQuality({ kind: "near-capacity", groupKey: `teacher:${name}`, groupTitle: `${name} needs workload review`, title: `${name} has almost no free slots`, detail: `${load} of ${capacity} teaching slots are already assigned, so the generated timetable may have no breathing room.`, step: 4 });
   });
   assignments.forEach((item) => {
     if (Number(item.periods || 0) > days * 2) addCritical({ title: `${item.subject} frequency is too high`, detail: `${item.periods} periods/week exceeds the maximum of ${days * 2} supported for one assignment.`, step: 3 });
-    if (item.className && !validClassSections.has(item.className)) addQuality({ title: `${item.className} is not an active section`, detail: "This assignment points to a class/section that is no longer in your class list.", step: 4 });
-    if (item.teacher && !validTeachers.has(item.teacher)) addQuality({ title: `${item.teacher} is not in the teacher list`, detail: "This assignment may appear in the output with a teacher that has been removed.", step: 4 });
-    if (item.subject && !validSubjects.has(item.subject)) addQuality({ title: `${item.subject} is not in the subject library`, detail: "This assignment may generate, but the subject is no longer managed in your subject list.", step: 3 });
+    if (item.className && !validClassSections.has(item.className)) addQuality({ kind: "stale-data", groupKey: "cleanup", groupTitle: "Some assignments need cleanup", title: `${item.className} is not an active section`, detail: "This assignment points to a class/section that is no longer in your class list.", step: 4 });
+    if (item.teacher && !validTeachers.has(item.teacher)) addQuality({ kind: "stale-data", groupKey: "cleanup", groupTitle: "Some assignments need cleanup", title: `${item.teacher} is not in the teacher list`, detail: "This assignment may appear in the output with a teacher that has been removed.", step: 4 });
+    if (item.subject && !validSubjects.has(item.subject)) addQuality({ kind: "stale-data", groupKey: "cleanup", groupTitle: "Some assignments need cleanup", title: `${item.subject} is not in the subject library`, detail: "This assignment may generate, but the subject is no longer managed in your subject list.", step: 3 });
   });
   teachers.forEach((teacher) => {
-    if (!teacherLoads[teacher.name]) addQuality({ title: `${teacher.name} has no assignments`, detail: "The timetable can still generate, but this teacher will not appear in it.", step: 4 });
+    if (!teacherLoads[teacher.name]) addQuality({ kind: "unused-teacher", groupKey: `teacher:${teacher.name}`, groupTitle: `${teacher.name} needs workload review`, title: `${teacher.name} has no assignments`, detail: "The timetable can still generate, but this teacher will not appear in it.", step: 4 });
   });
   classSectionNames.forEach((name) => {
     const load = classLoads[name] || 0;
     const capacity = days * classDailyPeriods(classPeriods, periods, name, classes);
-    if (!load) addQuality({ title: `${name} has no assigned periods`, detail: "The timetable can generate for other sections, but this section will be empty.", step: 4 });
-    else if (capacity && load < capacity) addQuality({ title: `${name} is under-filled`, detail: `${load} of ${capacity} weekly slots are assigned, so the timetable will have blank periods.`, step: 3 });
+    if (!load) addQuality({ kind: "empty-section", groupKey: `class:${name}`, groupTitle: `${name} coverage needs review`, blankSlots: capacity, title: `${name} has no assigned periods`, detail: "The timetable can generate for other sections, but this section will be empty.", step: 4 });
+    else if (capacity && load < capacity) addQuality({ kind: "under-filled", groupKey: `class:${name}`, groupTitle: `${name} coverage needs review`, blankSlots: capacity - load, title: `${name} is under-filled`, detail: `${load} of ${capacity} weekly slots are assigned, so the timetable will have blank periods.`, step: 3 });
   });
   classes.forEach((className) => {
     const planned = frequencies[className] || {};
@@ -1947,13 +1947,44 @@ function ReviewStep({
         const actual = assignments
           .filter((item) => item.className === sectionName && item.subject === subject)
           .reduce((sum, item) => sum + Number(item.periods || 0), 0);
-        if (target > actual) addQuality({ title: `${sectionName} is short on ${subject}`, detail: `Subject plan needs ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
-        if (actual > target) addQuality({ title: `${sectionName} has extra ${subject}`, detail: `Subject plan asks for ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
+        if (target > actual) addQuality({ kind: "subject-gap", groupKey: `class:${sectionName}`, groupTitle: `${sectionName} coverage needs review`, title: `${sectionName} is short on ${subject}`, detail: `Subject plan needs ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
+        if (actual > target) addQuality({ kind: "subject-extra", groupKey: `class:${sectionName}`, groupTitle: `${sectionName} coverage needs review`, title: `${sectionName} has extra ${subject}`, detail: `Subject plan asks for ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
       });
     });
   });
+  const qualityGroups = Object.values(
+    qualityIssues.reduce((groups, issue) => {
+      const key = issue.groupKey || issue.title;
+      groups[key] ||= {
+        key,
+        title: issue.groupTitle || issue.title,
+        step: issue.step,
+        items: [],
+        counts: {},
+        blankSlots: 0,
+      };
+      groups[key].items.push(issue);
+      groups[key].counts[issue.kind || "warning"] =
+        (groups[key].counts[issue.kind || "warning"] || 0) + 1;
+      groups[key].blankSlots += Number(issue.blankSlots || 0);
+      return groups;
+    }, {}),
+  ).map((group) => {
+    const summaryParts = [];
+    if (group.counts["empty-section"]) summaryParts.push("No periods assigned");
+    if (group.blankSlots) summaryParts.push(`${group.blankSlots} blank slot${group.blankSlots === 1 ? "" : "s"}`);
+    if (group.counts["subject-gap"]) summaryParts.push(`${group.counts["subject-gap"]} subject gap${group.counts["subject-gap"] === 1 ? "" : "s"}`);
+    if (group.counts["subject-extra"]) summaryParts.push(`${group.counts["subject-extra"]} extra subject load${group.counts["subject-extra"] === 1 ? "" : "s"}`);
+    if (group.counts["near-capacity"]) summaryParts.push("Teacher is near full capacity");
+    if (group.counts["unused-teacher"]) summaryParts.push("Teacher is unused");
+    if (group.counts["stale-data"]) summaryParts.push(`${group.counts["stale-data"]} stale assignment${group.counts["stale-data"] === 1 ? "" : "s"}`);
+    return {
+      ...group,
+      summary: summaryParts.join(" · ") || `${group.items.length} warning${group.items.length === 1 ? "" : "s"} to review`,
+    };
+  });
   const hasCriticalIssues = criticalIssues.length > 0;
-  const hasQualityIssues = qualityIssues.length > 0;
+  const hasQualityIssues = qualityGroups.length > 0;
   const hasIssues = hasCriticalIssues || hasQualityIssues;
   const cards = [
     {
@@ -1998,8 +2029,8 @@ function ReviewStep({
     },
     {
       label: "Coverage",
-      value: hasCriticalIssues ? `${criticalIssues.length} blockers` : hasQualityIssues ? `${qualityIssues.length} warnings` : "Ready to generate",
-      sub: hasCriticalIssues ? "Must fix before generation" : hasQualityIssues ? "Can generate, but review first" : "All essentials covered",
+      value: hasCriticalIssues ? `${criticalIssues.length} blockers` : hasQualityIssues ? `${qualityGroups.length} areas` : "Ready to generate",
+      sub: hasCriticalIssues ? "Must fix before generation" : hasQualityIssues ? `${qualityIssues.length} checks grouped` : "All essentials covered",
       icon: hasIssues ? AlertTriangle : CheckCircle2,
       step: 5,
       accent: hasCriticalIssues ? "red" : hasQualityIssues ? "yellow" : "green",
@@ -2016,7 +2047,7 @@ function ReviewStep({
             {hasCriticalIssues
               ? `${criticalIssues.length} critical blocker${criticalIssues.length === 1 ? "" : "s"} found`
               : hasQualityIssues
-                ? `${qualityIssues.length} quality warning${qualityIssues.length === 1 ? "" : "s"} found`
+                ? `${qualityGroups.length} area${qualityGroups.length === 1 ? " needs" : "s need"} review`
                 : "Your setup is ready"}
           </h2>
           <p>
@@ -2077,15 +2108,29 @@ function ReviewStep({
               <div className="issue-section warning">
                 <div className="issue-heading">
                   <span>Quality warnings</span>
-                  <b>{qualityIssues.length}</b>
+                  <b>{qualityGroups.length} groups</b>
                 </div>
-                <div className="blocker-list">
-                  {qualityIssues.map((issue, index) => (
-                    <div className="blocker-item" key={`${issue.title}-${index}`}>
-                      <AlertTriangle size={17} />
-                      <div><strong>{issue.title}</strong><small>{issue.detail}</small></div>
-                      <button className="ghost-button small" onClick={() => setStep(issue.step)}>Review</button>
-                    </div>
+                <div className="warning-group-list">
+                  {qualityGroups.map((group) => (
+                    <details className="warning-group-card" key={group.key}>
+                      <summary>
+                        <AlertTriangle size={17} />
+                        <span>
+                          <strong>{group.title}</strong>
+                          <small>{group.summary}</small>
+                        </span>
+                        <em>{group.items.length} check{group.items.length === 1 ? "" : "s"}</em>
+                      </summary>
+                      <div className="warning-detail-list">
+                        {group.items.map((issue, index) => (
+                          <div className="warning-detail-row" key={`${issue.title}-${index}`}>
+                            <span>{issue.title}</span>
+                            <small>{issue.detail}</small>
+                          </div>
+                        ))}
+                        <button className="ghost-button small" onClick={() => setStep(group.step)}>Review related step</button>
+                      </div>
+                    </details>
                   ))}
                 </div>
               </div>
