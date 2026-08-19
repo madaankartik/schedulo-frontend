@@ -426,6 +426,7 @@ export function App({ organization, session }) {
                     setAssignments={setAssignments}
                     subjects={subjects}
                     classes={classes}
+                    sections={sections}
                     showAddTeacher={showAddTeacher}
                     setShowAddTeacher={setShowAddTeacher}
                     notify={notify}
@@ -1145,16 +1146,21 @@ function TeachersStep({
   setAssignments,
   subjects,
   classes,
+  sections,
   showAddTeacher,
   setShowAddTeacher,
   notify,
 }) {
+  const classOptions = classes.flatMap((name) =>
+    (sections[name] || ["A"]).map((section) => `${name} ${section}`),
+  );
+  const firstClassOption = classOptions[0] || "";
   const [draft, setDraft] = useState({ name: "", email: "" });
   const [editing, setEditing] = useState(null);
   const [expandedTeacher, setExpandedTeacher] = useState(null);
   const [assignmentDraft, setAssignmentDraft] = useState({
     subject: subjects[0] || "",
-    className: classes[0] ? `${classes[0]} A` : "",
+    className: firstClassOption,
     periods: 3,
   });
   const addTeacher = () => {
@@ -1327,7 +1333,7 @@ function TeachersStep({
                   setExpandedTeacher(expandedTeacher === teacher.name ? null : teacher.name);
                   setAssignmentDraft({
                     subject: subjects[0] || "",
-                    className: classes[0] ? `${classes[0]} A` : "",
+                    className: firstClassOption,
                     periods: 3,
                   });
                 }}
@@ -1344,7 +1350,7 @@ function TeachersStep({
                   setExpandedTeacher(teacher.name);
                   setAssignmentDraft({
                     subject: subjects[0] || "",
-                    className: classes[0] ? `${classes[0]} A` : "",
+                    className: firstClassOption,
                     periods: 3,
                   });
                 }}
@@ -1382,7 +1388,7 @@ function TeachersStep({
                     onChange={(e) => setAssignmentDraft({ ...assignmentDraft, className: e.target.value })}
                   >
                     <option value="">Select class</option>
-                    {classes.map((name) => <option key={name}>{name} A</option>)}
+                    {classOptions.map((option) => <option key={option}>{option}</option>)}
                   </select>
                   <input
                     type="number"
