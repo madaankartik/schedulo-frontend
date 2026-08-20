@@ -36,6 +36,12 @@ const steps = [
   "Teachers",
   "Review",
 ];
+const safeStoredStep = (key) => {
+  const value = Number(window.localStorage.getItem(key));
+  return Number.isInteger(value) && value >= 0 && value < steps.length
+    ? value
+    : 0;
+};
 const quickClasses = [
   "Nursery",
   "LKG",
@@ -93,6 +99,12 @@ const subjectColors = {
   Computer: "#7d70c4",
   Art: "#e78963",
 };
+const timeRuleLabels = {
+  beforeMess: "Before mess",
+  afterMess: "After mess",
+  beforeLunch: "Before lunch",
+  afterLunch: "After lunch",
+};
 const todayInputValue = () => {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -102,9 +114,7 @@ const todayInputValue = () => {
 export function App({ organization, session }) {
   const stepStorageKey = `schedulo_step_${organization?.school_id || "draft"}`;
   const draftStorageKey = `schedulo_setup_draft_${organization?.school_id || "draft"}`;
-  const [step, setStep] = useState(() =>
-    Number(window.localStorage.getItem(stepStorageKey) || 0),
-  );
+  const [step, setStep] = useState(() => safeStoredStep(stepStorageKey));
   const [school, setSchool] = useState({
     name: organization?.name || "",
     year: organization?.academic_year || "",
@@ -124,8 +134,12 @@ export function App({ organization, session }) {
   const [schoolId, setSchoolId] = useState(organization?.school_id || null);
   const [hydrated, setHydrated] = useState(false);
   const [generated, setGenerated] = useState(null);
+  const [savedTimetable, setSavedTimetable] = useState([]);
+  const [timing, setTiming] = useState({ messAfter: 3, lunchAfter: 5 });
+  const [timeRules, setTimeRules] = useState([]);
   const [page, setPage] = useState("setup");
   const [generating, setGenerating] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
 
   const totalSections = Object.values(sections).reduce(
     (sum, list) => sum + (Array.isArray(list) ? list.length : 0),
@@ -195,7 +209,9 @@ export function App({ organization, session }) {
     frequencies,
     teachers,
     assignments,
-    generated,
+    timing,
+    timeRules,
+    draftTimetable: generated?.entries?.length ? generated : null,
   });
   const authHeaders = () => ({
     "Content-Type": "application/json",
@@ -255,16 +271,12 @@ export function App({ organization, session }) {
     if (saved.frequencies) setFrequencies(saved.frequencies);
     if (saved.teachers) setTeachers(saved.teachers);
     if (saved.assignments) setAssignments(saved.assignments);
-    if (Array.isArray(data.timetable) && data.timetable.length) {
-      setGenerated({
-        ...(saved.generated || {}),
-        status: saved.generated?.status || "SAVED",
-        entries: data.timetable,
-        diagnostics: saved.generated?.diagnostics || [],
-      });
-    } else if (saved.generated) {
-      setGenerated(saved.generated);
-    }
+    if (saved.timing) setTiming(saved.timing);
+    if (saved.timeRules) setTimeRules(saved.timeRules);
+    setSavedTimetable(Array.isArray(data.timetable) ? data.timetable : []);
+    const draftTimetable =
+      data.draft_timetable || saved.draftTimetable || saved.generated;
+    setGenerated(draftTimetable?.entries?.length ? draftTimetable : null);
   };
   const saveSetup = async () => {
     const draft = writeSetupDraft();
@@ -335,10 +347,20 @@ export function App({ organization, session }) {
     frequencies,
     teachers,
     assignments,
+    timing,
+    timeRules,
     generated,
   ]);
   const generate = async () => {
     if (generating) return;
+    if (
+      generated?.entries?.length &&
+      !window.confirm(
+        "Generate a new draft? Your saved timetable will stay unchanged, but this draft preview will be replaced.",
+      )
+    ) {
+      return;
+    }
     setGenerating(true);
     try {
       const saved = await saveSetup();
@@ -351,17 +373,59 @@ export function App({ organization, session }) {
         { method: "POST", headers: authHeaders() },
       );
       const result = await response.json();
-      setGenerated(result);
+      setGenerated({ ...result, mode: result.mode || "draft" });
       notify(
         result.status === "INFEASIBLE"
           ? "Fix the setup blockers before generating"
-          : `Generated ${result.entries.length} timetable periods`,
+          : `Draft generated with ${result.entries.length} periods`,
       );
     } catch {
       notify("Backend is offline — run python run.py");
     } finally {
       setGenerating(false);
     }
+  };
+  const saveDraftAsCurrent = async () => {
+    if (!generated?.entries?.length || savingDraft) return false;
+    setSavingDraft(true);
+    try {
+      const response = await fetch(
+        `${API_URL}/api/v1/schools/${schoolId}/timetable/save-draft`,
+        { method: "POST", headers: authHeaders() },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        notify(Array.isArray(result.detail) ? result.detail[0] : result.detail || "Could not save draft");
+        return false;
+      }
+      setSavedTimetable(result.entries || []);
+      setGenerated((current) => ({
+        ...(current || {}),
+        status: "SAVED",
+        savedAsCurrent: true,
+      }));
+      notify("Draft saved as current timetable");
+      return true;
+    } catch {
+      notify("Backend is offline — draft was not saved");
+      return false;
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+  const handleTimetableEntriesChange = (source, entries) => {
+    if (source === "current") {
+      setSavedTimetable(entries);
+      notify("Saved timetable updated");
+      return;
+    }
+    setGenerated((current) => ({
+      ...(current || {}),
+      entries,
+      mode: "draft",
+      edited: true,
+    }));
+    notify("Draft timetable updated");
   };
   const toggleClass = (name) => {
     if (classes.includes(name)) {
@@ -465,6 +529,8 @@ export function App({ organization, session }) {
     generate();
   };
   const previous = () => setStep(Math.max(0, step - 1));
+  const hasDraftToSave =
+    generated?.entries?.length > 0 && generated.status !== "INFEASIBLE";
 
   return (
     <div className="app-shell">
@@ -474,9 +540,12 @@ export function App({ organization, session }) {
         <div className="page-wrap">
           {page === "view" ? (
             <TimetableView
-              generated={generated}
-              classes={classes}
+              entries={savedTimetable}
               school={school}
+              schoolId={schoolId}
+              session={session}
+              notify={notify}
+              onEntriesChange={handleTimetableEntriesChange}
               onGenerate={() => {
                 setPage("setup");
                 setStep(5);
@@ -488,7 +557,7 @@ export function App({ organization, session }) {
               schoolId={schoolId}
               school={school}
               teachers={teachers}
-              generated={generated}
+              generated={{ entries: savedTimetable }}
               session={session}
               notify={notify}
               onGenerate={() => {
@@ -506,7 +575,7 @@ export function App({ organization, session }) {
               teachers={teachers}
               assignments={assignments}
               blockers={blockers}
-              generated={generated}
+              generated={{ entries: savedTimetable }}
               onSetup={() => setStep(0)}
             />
           ) : (
@@ -552,6 +621,11 @@ export function App({ organization, session }) {
                     classPeriods={classPeriods}
                     setClassPeriods={setClassPeriods}
                     classes={classes}
+                    subjects={subjects}
+                    timing={timing}
+                    setTiming={setTiming}
+                    timeRules={timeRules}
+                    setTimeRules={setTimeRules}
                   />
                 )}
                 {step === 3 && (
@@ -594,16 +668,14 @@ export function App({ organization, session }) {
                     classPeriods={classPeriods}
                     subjects={subjects}
                     frequencies={frequencies}
-                    teachers={teachers}
-                    assignments={assignments}
-                    blockers={blockers}
-                    preflight={preflight}
-                    setStep={setStep}
-                    notify={notify}
-                    generated={generated}
-                    onGenerate={generate}
-                    generating={generating}
-                  />
+	                    teachers={teachers}
+	                    assignments={assignments}
+	                    setStep={setStep}
+	                    generated={generated}
+	                    session={session}
+                      notify={notify}
+	                    onTimetableEntriesChange={handleTimetableEntriesChange}
+	                  />
                 )}
               </section>
               <div className="wizard-footer">
@@ -614,24 +686,49 @@ export function App({ organization, session }) {
                 >
                   <ArrowLeft size={17} /> Back
                 </button>
-                <div className="footer-note">
-                  {step === 5
-                    ? "Review the setup before generating"
-                    : "You can return and edit this step later"}
-                </div>
-                <button
-                  className="primary-button"
-                  onClick={next}
-                  disabled={step === 5 && generating}
-                >
-                  {step === 5
-                    ? generating
-                      ? "Generating..."
-                      : "Save & generate"
-                    : "Continue"}{" "}
-                  <ArrowRight size={17} />
-                </button>
-              </div>
+	                <div className="footer-note">
+	                  {step === 5
+	                    ? hasDraftToSave
+	                      ? "This draft is separate until you save it to View Timetable"
+	                      : "Generate a draft first, then save it for staff"
+	                    : "You can return and edit this step later"}
+	                </div>
+	                {step === 5 ? (
+	                  <div className="footer-actions">
+	                    <button
+	                      className="secondary-button"
+	                      onClick={async () => {
+	                        const saved = await saveDraftAsCurrent();
+	                        if (saved) setPage("view");
+	                      }}
+	                      disabled={!hasDraftToSave || savingDraft}
+	                    >
+	                      <CheckCircle2 size={17} />
+	                      {savingDraft ? "Saving..." : "Save draft to View Timetable"}
+	                    </button>
+	                    <button
+	                      className="primary-button"
+	                      onClick={generate}
+	                      disabled={generating}
+	                    >
+	                      <Sparkles size={17} />
+	                      {generating
+	                        ? "Generating..."
+	                        : hasDraftToSave
+	                          ? "Generate new draft"
+	                          : "Generate draft"}
+	                      <ArrowRight size={17} />
+	                    </button>
+	                  </div>
+	                ) : (
+	                  <button
+	                    className="primary-button"
+	                    onClick={next}
+	                  >
+	                    Continue <ArrowRight size={17} />
+	                  </button>
+	                )}
+	              </div>
             </>
           ))}
         </div>
@@ -1095,6 +1192,11 @@ function PeriodsStep({
   classPeriods,
   setClassPeriods,
   classes,
+  subjects,
+  timing,
+  setTiming,
+  timeRules,
+  setTimeRules,
 }) {
   const bulkPeriods = Math.max(1, Number(periods || 1));
   const periodForClass = (name) =>
@@ -1175,7 +1277,164 @@ function PeriodsStep({
           ))}
         </div>
       </Card>
+      <TimeRulesCard
+        subjects={subjects}
+        classes={classes}
+        periods={periods}
+        timing={timing}
+        setTiming={setTiming}
+        timeRules={timeRules}
+        setTimeRules={setTimeRules}
+      />
     </div>
+  );
+}
+
+function TimeRulesCard({
+  subjects,
+  classes,
+  periods,
+  timing,
+  setTiming,
+  timeRules,
+  setTimeRules,
+}) {
+  const [ruleDraft, setRuleDraft] = useState({
+    subject: subjects[0] || "",
+    className: "All classes",
+    relation: "beforeLunch",
+  });
+  useEffect(() => {
+    if (!subjects.length) {
+      setRuleDraft((current) => ({ ...current, subject: "" }));
+      return;
+    }
+    if (!ruleDraft.subject || !subjects.includes(ruleDraft.subject)) {
+      setRuleDraft((current) => ({ ...current, subject: subjects[0] }));
+    }
+  }, [subjects, ruleDraft.subject]);
+  const updateTiming = (key, delta) => {
+    const maxPeriod = Math.max(1, Number(periods || 1));
+    setTiming({
+      ...timing,
+      [key]: Math.max(1, Math.min(maxPeriod, Number(timing?.[key] || 1) + delta)),
+    });
+  };
+  const addRule = () => {
+    if (!ruleDraft.subject) return;
+    const nextRule = {
+      id: `${Date.now()}-${ruleDraft.subject}-${ruleDraft.relation}`,
+      ...ruleDraft,
+      hard: true,
+    };
+    const duplicate = timeRules.some(
+      (rule) =>
+        rule.subject === nextRule.subject &&
+        (rule.className || "All classes") === nextRule.className &&
+        rule.relation === nextRule.relation,
+    );
+    if (duplicate) return;
+    setTimeRules([...timeRules, nextRule]);
+  };
+  return (
+    <Card
+      icon={SlidersHorizontal}
+      title="Timing rules"
+      description="Add prerequisites like a subject before mess or after lunch. These rules are treated as hard constraints."
+      accent="yellow"
+    >
+      <div className="timing-breaks">
+        {[
+          ["messAfter", "Mess break after P"],
+          ["lunchAfter", "Lunch break after P"],
+        ].map(([key, label]) => (
+          <div className="timing-break" key={key}>
+            <span>{label}</span>
+            <div className="stepper-control compact">
+              <button onClick={() => updateTiming(key, -1)}>−</button>
+              <b>{Number(timing?.[key] || 1)}</b>
+              <button onClick={() => updateTiming(key, 1)}>+</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="rule-builder">
+        <label>
+          Subject
+          <select
+            value={ruleDraft.subject}
+            onChange={(e) =>
+              setRuleDraft({ ...ruleDraft, subject: e.target.value })
+            }
+          >
+            {subjects.length ? (
+              subjects.map((subject) => <option key={subject}>{subject}</option>)
+            ) : (
+              <option value="">Add subjects first</option>
+            )}
+          </select>
+        </label>
+        <label>
+          Applies to
+          <select
+            value={ruleDraft.className}
+            onChange={(e) =>
+              setRuleDraft({ ...ruleDraft, className: e.target.value })
+            }
+          >
+            <option>All classes</option>
+            {classes.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Rule
+          <select
+            value={ruleDraft.relation}
+            onChange={(e) =>
+              setRuleDraft({ ...ruleDraft, relation: e.target.value })
+            }
+          >
+            {Object.entries(timeRuleLabels).map(([value, label]) => (
+              <option value={value} key={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="primary-button small"
+          onClick={addRule}
+          disabled={!subjects.length}
+        >
+          <Plus size={14} /> Add rule
+        </button>
+      </div>
+      <div className="rule-chip-list">
+        {timeRules.length ? (
+          timeRules.map((rule) => (
+            <span className="rule-chip" key={rule.id || `${rule.subject}-${rule.relation}-${rule.className}`}>
+              <strong>{rule.subject}</strong>
+              {timeRuleLabels[rule.relation] || rule.relation}
+              <small>{rule.className || "All classes"}</small>
+              <button
+                onClick={() =>
+                  setTimeRules(timeRules.filter((item) => item !== rule))
+                }
+              >
+                <X size={13} />
+              </button>
+            </span>
+          ))
+        ) : (
+          <div className="quiet-empty">
+            No timing rules yet. Keep it empty if your school has no fixed
+            subject-before/after-break requirements.
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -1909,13 +2168,11 @@ function ReviewStep({
   frequencies = {},
   teachers,
   assignments,
-  blockers,
-  preflight,
   setStep,
-  notify,
   generated,
-  onGenerate,
-  generating,
+  session,
+  notify,
+  onTimetableEntriesChange,
 }) {
   const maxDailyPeriods = Math.max(
     Number(periods || 0),
@@ -1961,8 +2218,8 @@ function ReviewStep({
   classSectionNames.forEach((name) => {
     const load = classLoads[name] || 0;
     const capacity = days * classDailyPeriods(classPeriods, periods, name, classes);
-    if (!load) addQuality({ kind: "empty-section", groupKey: `class:${name}`, groupTitle: `${name} coverage needs review`, blankSlots: capacity, title: `${name} has no assigned periods`, detail: "The timetable can generate for other sections, but this section will be empty.", step: 4 });
-    else if (capacity && load < capacity) addQuality({ kind: "under-filled", groupKey: `class:${name}`, groupTitle: `${name} coverage needs review`, blankSlots: capacity - load, title: `${name} is under-filled`, detail: `${load} of ${capacity} weekly slots are assigned, so the timetable will have blank periods.`, step: 3 });
+    if (!load) addQuality({ kind: "empty-section", groupKey: `class:${name}`, groupTitle: `${name} has no timetable plan yet`, blankSlots: capacity, title: `${name} has no assigned periods`, detail: "The timetable can generate for other sections, but this section will be empty.", step: 4 });
+    else if (capacity && load < capacity) addQuality({ kind: "under-filled", groupKey: `class:${name}`, groupTitle: `${name} may have blank periods`, blankSlots: capacity - load, title: `${name} is under-filled`, detail: `${load} of ${capacity} weekly slots are assigned, so the timetable will have blank periods.`, step: 3 });
   });
   classes.forEach((className) => {
     const planned = frequencies[className] || {};
@@ -1973,8 +2230,8 @@ function ReviewStep({
         const actual = assignments
           .filter((item) => item.className === sectionName && item.subject === subject)
           .reduce((sum, item) => sum + Number(item.periods || 0), 0);
-        if (target > actual) addQuality({ kind: "subject-gap", groupKey: `class:${sectionName}`, groupTitle: `${sectionName} coverage needs review`, title: `${sectionName} is short on ${subject}`, detail: `Subject plan needs ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
-        if (actual > target) addQuality({ kind: "subject-extra", groupKey: `class:${sectionName}`, groupTitle: `${sectionName} coverage needs review`, title: `${sectionName} has extra ${subject}`, detail: `Subject plan asks for ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
+        if (target > actual) addQuality({ kind: "subject-gap", groupKey: `class:${sectionName}`, groupTitle: `${sectionName} has missing subject periods`, title: `${sectionName} is short on ${subject}`, detail: `Subject plan needs ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
+        if (actual > target) addQuality({ kind: "subject-extra", groupKey: `class:${sectionName}`, groupTitle: `${sectionName} has extra assigned periods`, title: `${sectionName} has extra ${subject}`, detail: `Subject plan asks for ${target}/week, but teachers cover ${actual}/week.`, step: 4 });
       });
     });
   });
@@ -2053,14 +2310,6 @@ function ReviewStep({
       step: 4,
       accent: "coral",
     },
-    {
-      label: "Coverage",
-      value: hasCriticalIssues ? `${criticalIssues.length} blockers` : hasQualityIssues ? `${qualityGroups.length} areas` : "Ready to generate",
-      sub: hasCriticalIssues ? "Must fix before generation" : hasQualityIssues ? `${qualityIssues.length} checks grouped` : "All essentials covered",
-      icon: hasIssues ? AlertTriangle : CheckCircle2,
-      step: 5,
-      accent: hasCriticalIssues ? "red" : hasQualityIssues ? "yellow" : "green",
-    },
   ];
   return (
     <div className="stack">
@@ -2071,17 +2320,17 @@ function ReviewStep({
         <div>
           <h2>
             {hasCriticalIssues
-              ? `${criticalIssues.length} critical blocker${criticalIssues.length === 1 ? "" : "s"} found`
+              ? `Fix ${criticalIssues.length} setup item${criticalIssues.length === 1 ? "" : "s"} before generating`
               : hasQualityIssues
-                ? `${qualityGroups.length} area${qualityGroups.length === 1 ? " needs" : "s need"} review`
-                : "Your setup is ready"}
+                ? `${qualityGroups.length} setup area${qualityGroups.length === 1 ? " needs" : "s need"} review`
+                : "Ready to generate a draft"}
           </h2>
           <p>
             {hasCriticalIssues
-              ? "Fix these first — the timetable cannot be generated reliably with this setup."
+              ? "These are hard blockers. Schedulo needs them fixed before it can create a timetable."
               : hasQualityIssues
-                ? "You can generate, but these issues may create empty classes, missing subjects, or overloaded teachers."
-              : "All essentials are covered. You can generate a first timetable now."}
+                ? "You can still generate, but these may create blank periods, missing subjects, or overloaded teachers."
+                : "All essentials are complete. Generate a draft, review it, then save it for staff."}
           </p>
         </div>
       </div>
@@ -2107,8 +2356,8 @@ function ReviewStep({
       </div>
       <Card
         icon={AlertTriangle}
-        title="Pre-flight checks"
-        description="Critical blockers stop generation. Quality warnings can still generate but may produce a weak timetable."
+        title="Before you generate"
+        description="This explains what will stop generation and what may make the timetable less useful."
         accent={hasCriticalIssues ? "red" : hasQualityIssues ? "yellow" : "green"}
       >
         {hasIssues ? (
@@ -2116,7 +2365,7 @@ function ReviewStep({
             {hasCriticalIssues && (
               <div className="issue-section critical">
                 <div className="issue-heading">
-                  <span>Critical blockers</span>
+                  <span>Must fix first</span>
                   <b>{criticalIssues.length}</b>
                 </div>
                 <div className="blocker-list">
@@ -2133,7 +2382,7 @@ function ReviewStep({
             {hasQualityIssues && (
               <div className="issue-section warning">
                 <div className="issue-heading">
-                  <span>Quality warnings</span>
+                  <span>Can generate, but review these</span>
                   <b>{qualityGroups.length} groups</b>
                 </div>
                 <div className="warning-group-list">
@@ -2165,13 +2414,6 @@ function ReviewStep({
         ) : (
           <div className="all-clear"><CheckCircle2 size={17} /><strong>Everything required is ready.</strong><span>Schedulo can generate a timetable without any known setup blockers.</span></div>
         )}
-        <button
-          className="primary-button generate-button"
-          onClick={onGenerate}
-          disabled={generating || hasCriticalIssues}
-        >
-          <Sparkles size={17} /> {generating ? "Generating..." : hasCriticalIssues ? "Fix critical blockers first" : "Generate timetable"}
-        </button>
         {generated && (
           <div
             className={`generation-result ${generated.status === "INFEASIBLE" ? "failed" : ""}`}
@@ -2179,35 +2421,71 @@ function ReviewStep({
             <strong>
               {generated.status === "INFEASIBLE"
                 ? "Generation needs attention"
-                : `Generated ${generated.entries.length} periods`}
+                : generated.savedAsCurrent
+                  ? "Draft saved to View Timetable"
+                  : `Draft ready: ${generated.entries.length} periods`}
             </strong>
             <span>
               {generated.status === "INFEASIBLE"
                 ? generated.diagnostics?.[0]
-                : `Solver finished in ${generated.solveSeconds || "—"} seconds.`}
+                : generated.savedAsCurrent
+                  ? "Open View Timetable to browse the saved class-wise and teacher-wise schedule."
+                  : `Solver finished in ${generated.solveSeconds || "—"} seconds. Use the bottom buttons to save this draft or generate another one.`}
             </span>
           </div>
         )}
       </Card>
       {generated?.entries?.length > 0 && (
-        <SchedulePreview entries={generated.entries} />
+        <SchedulePreview
+          entries={generated.entries}
+          title="Draft timetable"
+          description="Drag a period to a free slot or onto another period to swap. Invalid moves are blocked before saving."
+          editable
+          source="draft"
+          schoolId={schoolId}
+          session={session}
+          notify={notify}
+          onEntriesChange={(entries) =>
+            onTimetableEntriesChange("draft", entries)
+          }
+        />
       )}
     </div>
   );
 }
 
-function TimetableView({ generated, classes, school, onGenerate }) {
+function TimetableView({
+  entries,
+  school,
+  schoolId,
+  session,
+  notify,
+  onEntriesChange,
+  onGenerate,
+}) {
   return (
     <div className="stack timetable-view">
       <div className="eyebrow"><CalendarDays size={14} /> VIEW TIMETABLE</div>
       <div className="page-heading-row">
         <div>
           <h1>{school.name || "Your timetable"}</h1>
-          <p>Browse the latest saved timetable by class. Your generated schedule stays available after refresh.</p>
+          <p>Browse the saved timetable by class or teacher. Edits here update the current timetable used by staff and absences.</p>
         </div>
       </div>
-      {generated?.entries?.length ? (
-        <SchedulePreview entries={generated.entries} />
+      {entries?.length ? (
+        <SchedulePreview
+          entries={entries}
+          title="Saved timetable"
+          description="This is the current timetable. Drag periods only when you want to make a live correction."
+          editable
+          source="current"
+          schoolId={schoolId}
+          session={session}
+          notify={notify}
+          onEntriesChange={(nextEntries) =>
+            onEntriesChange("current", nextEntries)
+          }
+        />
       ) : (
         <Card icon={CalendarDays} title="No timetable yet" description="Generate a timetable from the Review step to see it here." accent="blue">
           <button className="primary-button" onClick={onGenerate}><Sparkles size={16} /> Generate timetable</button>
@@ -2217,7 +2495,17 @@ function TimetableView({ generated, classes, school, onGenerate }) {
   );
 }
 
-function SchedulePreview({ entries }) {
+function SchedulePreview({
+  entries = [],
+  title = "Generated timetable",
+  description = "Switch between class-wise and teacher-wise views from the same master schedule.",
+  editable = false,
+  source = "draft",
+  schoolId,
+  session,
+  onEntriesChange,
+  notify = () => {},
+}) {
   const classNames = useMemo(
     () => [...new Set(entries.map((entry) => entry.className))],
     [entries],
@@ -2227,6 +2515,12 @@ function SchedulePreview({ entries }) {
     [entries],
   );
   const [viewMode, setViewMode] = useState("class");
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [moving, setMoving] = useState(false);
+  const entriesWithIndex = useMemo(
+    () => entries.map((entry, index) => ({ entry, index })),
+    [entries],
+  );
   const options = useMemo(
     () => (viewMode === "class" ? classNames : teacherNames),
     [classNames, teacherNames, viewMode],
@@ -2241,7 +2535,7 @@ function SchedulePreview({ entries }) {
       setSelectedOption(options[0]);
     }
   }, [options, selectedOption]);
-  const visibleEntries = entries.filter((entry) =>
+  const visibleEntries = entriesWithIndex.filter(({ entry }) =>
     viewMode === "class"
       ? entry.className === selectedOption
       : entry.teacher === selectedOption,
@@ -2266,18 +2560,77 @@ function SchedulePreview({ entries }) {
   const totalSlots = days.length * periods.length;
   const selectedLoad = visibleEntries.length;
   const selectedFreeSlots = Math.max(0, totalSlots - selectedLoad);
+  const entryKey = (item) =>
+    item?.entry?.entryId || item?.entry?.id || `legacy:${item?.index ?? 0}`;
+  const handleDrop = async (targetDay, targetPeriod, targetItem) => {
+    if (!editable || !schoolId || !draggedItem || moving) return;
+    if (
+      draggedItem.index === targetItem?.index ||
+      (draggedItem.entry.day === targetDay &&
+        Number(draggedItem.entry.period) === Number(targetPeriod))
+    ) {
+      setDraggedItem(null);
+      return;
+    }
+    const isSwap = Boolean(targetItem);
+    if (
+      isSwap &&
+      !window.confirm("Swap these two periods? Schedulo will validate it first.")
+    ) {
+      setDraggedItem(null);
+      return;
+    }
+    setMoving(true);
+    try {
+      const response = await fetch(
+        `${API_URL}/api/v1/schools/${schoolId}/timetable/move`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session?.access_token
+              ? { Authorization: `Bearer ${session.access_token}` }
+              : {}),
+          },
+          body: JSON.stringify({
+            source,
+            entryId: entryKey(draggedItem),
+            entryIndex: draggedItem.index,
+            targetDay,
+            targetPeriod,
+            targetEntryId: targetItem ? entryKey(targetItem) : null,
+            targetEntryIndex: targetItem?.index,
+            swap: isSwap,
+          }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok || result.ok === false) {
+        const message = Array.isArray(result.errors)
+          ? result.errors[0]
+          : Array.isArray(result.detail)
+            ? result.detail[0]
+            : result.detail || "This move creates a conflict.";
+        notify(message);
+        return;
+      }
+      onEntriesChange?.(result.entries || []);
+    } catch {
+      notify("Could not save this timetable edit. Check the backend.");
+    } finally {
+      setMoving(false);
+      setDraggedItem(null);
+    }
+  };
   return (
-    <Card
-      icon={CalendarDays}
-      title="Generated timetable"
-      description="Switch between class-wise and teacher-wise views from the same master schedule."
-      accent="green"
-    >
+    <Card icon={CalendarDays} title={title} description={description} accent="green">
       <div className="schedule-meta">
         <span>
           <CheckCircle2 size={14} /> {entries.length} periods placed
         </span>
-        <span>{classNames.length} class views · {teacherNames.length} teacher views</span>
+        <span>
+          {classNames.length} class views · {teacherNames.length} teacher views
+        </span>
       </div>
       <div className="schedule-toolbar">
         <div className="schedule-mode-toggle" aria-label="Timetable view mode">
@@ -2298,9 +2651,22 @@ function SchedulePreview({ entries }) {
         </div>
         <div className="schedule-context-summary">
           <strong>{selectedOption || "No timetable selected"}</strong>
-          <span>{selectedLoad} periods · {selectedFreeSlots} free slots</span>
+          <span>
+            {selectedLoad} periods · {selectedFreeSlots} free slots
+          </span>
         </div>
       </div>
+      {editable && (
+        <div className="schedule-edit-note">
+          <Settings2 size={14} />
+          <span>
+            Drag a period to a free slot or onto another period to swap. Moves
+            are checked against teacher clashes, class clashes, daily limits,
+            and timing rules.
+          </span>
+          {moving && <b>Saving edit...</b>}
+        </div>
+      )}
       <div className="class-tabs schedule-class-tabs">
         {options.map((name) => (
           <button
@@ -2324,20 +2690,31 @@ function SchedulePreview({ entries }) {
             <strong>P{period}</strong>
             {days.map((day) => {
               const slotEntries = visibleEntries.filter(
-                (item) => item.day === day && item.period === period,
+                ({ entry }) => entry.day === day && entry.period === period,
               );
-              const entry = slotEntries[0];
+              const slotItem = slotEntries[0];
+              const entry = slotItem?.entry;
               return (
                 <div
-                  className={`schedule-cell ${slotEntries.length > 1 ? "conflict" : ""}`}
+                  className={`schedule-cell ${editable ? "editable" : ""} ${
+                    slotEntries.length > 1 ? "conflict" : ""
+                  }`}
                   key={`${day}-${period}`}
+                  onDragOver={(event) => {
+                    if (editable) event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    if (!editable) return;
+                    event.preventDefault();
+                    handleDrop(day, period, slotItem);
+                  }}
                 >
                   {slotEntries.length > 1 ? (
                     <>
                       <b>Conflict</b>
                       <small>
                         {slotEntries
-                          .map((item) =>
+                          .map(({ entry: item }) =>
                             viewMode === "class"
                               ? `${item.subject} · ${item.teacher}`
                               : `${item.subject} · ${item.className}`,
@@ -2346,7 +2723,12 @@ function SchedulePreview({ entries }) {
                       </small>
                     </>
                   ) : entry ? (
-                    <>
+                    <div
+                      className="schedule-entry"
+                      draggable={editable}
+                      onDragStart={() => setDraggedItem(slotItem)}
+                      onDragEnd={() => setDraggedItem(null)}
+                    >
                       <b
                         style={{
                           color: subjectColors[entry.subject] || "#3157d5",
@@ -2357,9 +2739,11 @@ function SchedulePreview({ entries }) {
                       <small>
                         {viewMode === "class" ? entry.teacher : entry.className}
                       </small>
-                    </>
+                    </div>
                   ) : (
-                    <span>Free period</span>
+                    <span>
+                      {editable && draggedItem ? "Drop here" : "Free period"}
+                    </span>
                   )}
                 </div>
               );
